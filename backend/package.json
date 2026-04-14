@@ -1,0 +1,22 @@
+{
+  "name": "resume-editor-backend",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.0.0",
+    "openai": "^4.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "nodemon": "^3.1.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

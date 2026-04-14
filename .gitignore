@@ -1,0 +1,15 @@
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+backend/dist/
+frontend/dist/
+backend/.env
+backend/persona.md
+*.pdf
+
+
+.claude
+.env
+.env.example
+
+Priyabrata_persona
