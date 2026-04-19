@@ -63,7 +63,7 @@ export default function App() {
   const fileInputRef = useRef(null);
   const pdfBlobRef = useRef(null);
 
-  const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount, projectedAtsDelta } = useSuggestions();
+  const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount } = useSuggestions();
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
 
   const [baselineAts, setBaselineAts] = useState(null);
@@ -483,7 +483,6 @@ export default function App() {
         pendingCount={pendingCount}
         acceptedCount={acceptedCount}
         rejectedCount={rejectedCount}
-        projectedAtsDelta={projectedAtsDelta}
         baselineAts={baselineAts}
         personaActive={personaActive}
         onRefreshPersona={handleRefreshPersona}
