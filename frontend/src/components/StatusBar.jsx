@@ -5,6 +5,7 @@ export default function StatusBar({
   acceptedCount,
   rejectedCount,
   projectedAtsDelta,
+  baselineAts,
   personaActive,
   onRefreshPersona,
 }) {
@@ -33,11 +34,19 @@ export default function StatusBar({
         <span>compiled {formatTime(lastCompileTime)}</span>
       )}
 
-      {projectedAtsDelta > 0 && (
+      {baselineAts != null && projectedAtsDelta > 0 ? (
+        <span style={{ color: '#4ade80' }}>
+          ATS {baselineAts} → {baselineAts + projectedAtsDelta} (+{projectedAtsDelta} pts)
+        </span>
+      ) : baselineAts != null ? (
+        <span style={{ color: '#a78bfa' }}>
+          ATS baseline {baselineAts}
+        </span>
+      ) : projectedAtsDelta > 0 ? (
         <span style={{ color: '#4ade80' }}>
           ATS +{projectedAtsDelta} pts projected
         </span>
-      )}
+      ) : null}
 
       <span>
         <span style={{ color: '#fbbf24' }}>{pendingCount} pending</span>

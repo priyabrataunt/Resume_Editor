@@ -31,7 +31,19 @@ export async function compileLatex(texSource: string): Promise<Buffer> {
       // log might not exist
     }
     const message = (err instanceof Error ? err.message : String(err));
-    throw new Error(`pdflatex failed: ${message}\n${logContent.slice(-2000)}`);
+    // Extract the actual LaTeX errors (lines starting with !) plus context
+    const logLines = logContent.split('\n');
+    const errorLines: string[] = [];
+    for (let i = 0; i < logLines.length; i++) {
+      if (logLines[i].startsWith('!')) {
+        // Include the error line plus up to 4 lines of context
+        errorLines.push(...logLines.slice(i, i + 5));
+      }
+    }
+    const errorSummary = errorLines.length > 0
+      ? errorLines.join('\n')
+      : logContent.slice(-2000);
+    throw new Error(`pdflatex failed:\n${errorSummary}`);
   } finally {
     for (const ext of ['.tex', '.pdf', '.log', '.aux', '.out']) {
       await unlink(join(dir, `${id}${ext}`)).catch(() => {});

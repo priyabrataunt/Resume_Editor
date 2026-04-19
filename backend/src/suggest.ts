@@ -27,11 +27,49 @@ export async function generateSuggestions(
     ? `You are a resume optimization assistant. Write in the voice described below.\n\n${persona}`
     : 'You are a resume optimization assistant. Write in a professional, impact-driven tone.';
 
-  const userPrompt = `Job Description:\n${jobDescription}\n\n---\n\nResume (LaTeX source with line numbers):\n${numberedResume}\n\n---\n\nSuggest targeted improvements at the bullet or line level to better match the job description. For each suggestion:\n- "old": the EXACT original text as it appears in the resume (must be a verbatim substring — copy it character-for-character including all LaTeX commands like \\resumeItem{...}, \\textbf{...}, \\texttt{...}, etc.)\n- "new": the improved replacement text. CRITICAL: preserve the EXACT same LaTeX formatting, commands, and structure as the original. If the original uses \\resumeItem{...}, the replacement must also use \\resumeItem{...}. Keep all surrounding LaTeX markup intact — only change the descriptive content inside.\n- "reason": explain how it matches JD keywords\n- "ats_delta": estimated ATS score improvement (integer, 1–20)\n- "line": the 1-based line number shown at the start of the line where "old" begins in the numbered resume above\n\nRespond with a JSON object exactly like this:\n{\n  "suggestions": [\n    {\n      "section": "Experience",\n      "line": 12,\n      "old": "\\\\resumeItem{exact original text with LaTeX commands}",\n      "new": "\\\\resumeItem{improved text preserving same LaTeX structure}",\n      "reason": "Adds metric + matches JD keyword X",\n      "ats_delta": 8\n    }\n  ]\n}\n\nLimit to the 5 highest-impact suggestions. The "suggestions" key must always be present.`;
+  const userPrompt = `Job Description:\n${jobDescription}\n\n---\n\nResume (LaTeX source with line numbers):\n${numberedResume}\n\n---\n\nYour goal: maximize this resume's ATS score for the specific job description above.
+
+STEP 1 — Analyze the JD:
+Extract every keyword, technology, tool, methodology, skill, and requirement mentioned in the JD. Note how many times each appears (frequency = importance).
+
+STEP 2 — Audit every resume line:
+Go through every bullet point, skill line, and summary line in the resume. For each one, ask: "Could this line better match the JD?" Flag any line where:
+- A JD keyword is absent but could naturally fit the candidate's described work
+- The phrasing is weak/generic when the JD uses specific terminology
+- A measurable impact could be added that aligns with JD priorities
+- A skill is missing from the Skills section that appears in the JD and fits the candidate's background
+
+STEP 3 — Generate a suggestion for EVERY flagged line. There is no minimum or maximum — generate as many as genuinely improve ATS alignment. A strong resume might need 5 suggestions; a weak match might need 20. Let the actual JD-resume gap determine the count.
+
+Rules for every suggestion:
+- "old": copy the EXACT original line verbatim — character-for-character including all LaTeX commands
+- "new": the improved replacement. CRITICAL: preserve the EXACT same LaTeX structure as the original. Only change content, never outer LaTeX commands. If old uses \\resumeItem{\\textbf{Languages}: Python, JS}, new must also use \\resumeItem{\\textbf{Languages}: Python, JS, TypeScript}.
+- For Skills lines: the section may use any LaTeX format. Never introduce \\resumeItem or any command not already present in the line you are modifying.
+- "section": the resume section this line belongs to (e.g. "Experience", "Projects", "Skills", "Summary", "Education")
+- "reason": name the specific JD keywords added and their frequency in the JD
+- "ats_delta": estimated ATS score improvement for this single change (integer, 1–20)
+- "line": the 1-based line number shown at the start of the line where "old" begins
+
+Respond with this JSON structure:
+{
+  "suggestions": [
+    {
+      "section": "Experience",
+      "line": 12,
+      "old": "exact original line with all LaTeX commands",
+      "new": "improved line preserving exact LaTeX structure",
+      "reason": "Adds 'Kubernetes' (appears 5x in JD) and quantifies impact",
+      "ats_delta": 8
+    }
+  ]
+}
+
+The "suggestions" key must always be present. Do not pad with low-value suggestions, but do not artificially cap the count — cover every line where there is a genuine ATS improvement opportunity.`;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     temperature: 0.4,
+    max_tokens: 8000,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: systemPrompt },

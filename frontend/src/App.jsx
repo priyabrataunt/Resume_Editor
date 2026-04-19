@@ -66,11 +66,26 @@ export default function App() {
   const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount, projectedAtsDelta } = useSuggestions();
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
 
-  // On load: read ?jd= URL param (URLSearchParams already percent-decodes)
+  const [baselineAts, setBaselineAts] = useState(null);
+
+  // On load: read ?jd= and ?ats= URL params, and fetch uploaded resume from job tracker
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const jd = params.get('jd');
     if (jd) setJdText(jd);
+    const ats = params.get('ats');
+    if (ats) setBaselineAts(parseInt(ats, 10));
+
+    // Try to load the resume uploaded in the Job Tracker
+    fetch('http://localhost:8000/api/resume')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.uploaded && data.resumeText?.trim()) {
+          setResumeText(data.resumeText.trim());
+          if (data.filename) setFileName(data.filename);
+        }
+      })
+      .catch(() => { /* job tracker not running, keep default template */ });
   }, []);
 
   // On load: ping backend health and check persona
@@ -159,8 +174,26 @@ export default function App() {
     const s = suggestions[suggestionIdx];
     if (!s) return;
 
+    // Guard: reject suggestions with unbalanced braces (would break LaTeX)
+    const braceBalance = (str) => {
+      let depth = 0;
+      for (const ch of str) {
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        if (depth < 0) return false;
+      }
+      return depth === 0;
+    };
+    if (!braceBalance(s.new)) {
+      alert('This suggestion has unbalanced braces and cannot be applied safely. It has been dismissed.');
+      dismiss(suggestionIdx);
+      if (suggestions.length <= 1) setPopupState(null);
+      else setPopupState(prev => prev ? { ...prev, currentIndex: Math.min(suggestionIdx, suggestions.length - 2) } : null);
+      return;
+    }
+
     // Replace old text with new text in resumeText
-    const updated = resumeText.replace(s.old, s.new);
+    const updated = resumeText.replace(s.old, () => s.new);
     if (updated === resumeText) {
       // Couldn't find exact match — still apply by line number
       const lines = resumeText.split('\n');
@@ -203,7 +236,7 @@ export default function App() {
   function handleUndo() {
     const entry = popUndo();
     if (!entry) return;
-    setResumeText(prev => prev.replace(entry.new, entry.old));
+    setResumeText(prev => prev.replace(entry.new, () => entry.old));
     setAcceptedCount(c => Math.max(0, c - 1));
   }
 
@@ -451,6 +484,7 @@ export default function App() {
         acceptedCount={acceptedCount}
         rejectedCount={rejectedCount}
         projectedAtsDelta={projectedAtsDelta}
+        baselineAts={baselineAts}
         personaActive={personaActive}
         onRefreshPersona={handleRefreshPersona}
       />
