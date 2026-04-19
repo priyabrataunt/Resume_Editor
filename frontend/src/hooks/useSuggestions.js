@@ -41,7 +41,6 @@ export function useSuggestions() {
   const dismissAll = useCallback(() => setSuggestions([]), []);
 
   const pendingCount = suggestions.length;
-  const projectedAtsDelta = suggestions.reduce((sum, s) => sum + (s.ats_delta ?? 0), 0);
 
-  return { suggestions, status, error, fetch, dismiss, dismissAll, pendingCount, projectedAtsDelta };
+  return { suggestions, status, error, fetch, dismiss, dismissAll, pendingCount };
 }

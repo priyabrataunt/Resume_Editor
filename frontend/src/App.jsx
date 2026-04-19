@@ -5,6 +5,7 @@ import PDFPreview from './components/PDFPreview.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import { useSuggestions } from './hooks/useSuggestions.js';
 import { useUndoStack } from './hooks/useUndoStack.js';
+import { useKeywordScore } from './hooks/useKeywordScore.js';
 
 const DEFAULT_TEX = `\\documentclass[11pt]{article}
 \\usepackage{geometry}
@@ -63,8 +64,9 @@ export default function App() {
   const fileInputRef = useRef(null);
   const pdfBlobRef = useRef(null);
 
-  const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount, projectedAtsDelta } = useSuggestions();
+  const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount } = useSuggestions();
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
+  const keywordScore = useKeywordScore(jdText, resumeText);
 
   const [baselineAts, setBaselineAts] = useState(null);
 
@@ -315,7 +317,7 @@ export default function App() {
     },
     jdBar: {
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 8,
       padding: '6px 12px',
       borderBottom: '1px solid #1a1a2e',
@@ -331,6 +333,10 @@ export default function App() {
       fontSize: 12,
       padding: '5px 10px',
       outline: 'none',
+      resize: 'vertical',
+      minHeight: 72,
+      fontFamily: 'inherit',
+      lineHeight: 1.5,
     },
     editorArea: {
       flex: 1,
@@ -421,11 +427,11 @@ export default function App() {
 
       {/* JD Bar */}
       <div style={S.jdBar}>
-        <span style={{ fontSize: 12, color: '#555', whiteSpace: 'nowrap' }}>Job Description</span>
-        <input
+        <span style={{ fontSize: 12, color: '#555', whiteSpace: 'nowrap', paddingTop: 6 }}>Job Description</span>
+        <textarea
           style={S.jdInput}
-          type="text"
-          placeholder="Paste job description here, or auto-filled via ?jd= URL param"
+          rows={4}
+          placeholder="Paste the full job description here…"
           value={jdText}
           onChange={e => setJdText(e.target.value)}
         />
@@ -483,8 +489,8 @@ export default function App() {
         pendingCount={pendingCount}
         acceptedCount={acceptedCount}
         rejectedCount={rejectedCount}
-        projectedAtsDelta={projectedAtsDelta}
         baselineAts={baselineAts}
+        keywordScore={keywordScore}
         personaActive={personaActive}
         onRefreshPersona={handleRefreshPersona}
       />

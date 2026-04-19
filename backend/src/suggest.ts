@@ -6,7 +6,6 @@ export interface Suggestion {
   old: string;
   new: string;
   reason: string;
-  ats_delta: number;
 }
 
 
@@ -47,7 +46,6 @@ Rules for every suggestion:
 - For Skills lines: the section may use any LaTeX format. Never introduce \\resumeItem or any command not already present in the line you are modifying.
 - "section": the resume section this line belongs to (e.g. "Experience", "Projects", "Skills", "Summary", "Education")
 - "reason": name the specific JD keywords added and their frequency in the JD
-- "ats_delta": estimated ATS score improvement for this single change (integer, 1–20)
 - "line": the 1-based line number shown at the start of the line where "old" begins
 
 Respond with this JSON structure:
@@ -58,8 +56,7 @@ Respond with this JSON structure:
       "line": 12,
       "old": "exact original line with all LaTeX commands",
       "new": "improved line preserving exact LaTeX structure",
-      "reason": "Adds 'Kubernetes' (appears 5x in JD) and quantifies impact",
-      "ats_delta": 8
+      "reason": "Adds 'Kubernetes' (appears 5x in JD) and quantifies impact"
     }
   ]
 }
@@ -151,7 +148,6 @@ The "suggestions" key must always be present. Do not pad with low-value suggesti
       old: oldText,
       new: newText,
       reason: String(s.reason ?? ''),
-      ats_delta: Number(s.ats_delta ?? 5),
     });
   }
 

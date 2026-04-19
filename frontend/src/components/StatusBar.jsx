@@ -4,7 +4,7 @@ export default function StatusBar({
   pendingCount,
   acceptedCount,
   rejectedCount,
-  projectedAtsDelta,
+  keywordScore,
   baselineAts,
   personaActive,
   onRefreshPersona,
@@ -34,19 +34,16 @@ export default function StatusBar({
         <span>compiled {formatTime(lastCompileTime)}</span>
       )}
 
-      {baselineAts != null && projectedAtsDelta > 0 ? (
-        <span style={{ color: '#4ade80' }}>
-          ATS {baselineAts} → {baselineAts + projectedAtsDelta} (+{projectedAtsDelta} pts)
-        </span>
-      ) : baselineAts != null ? (
+      {baselineAts != null && (
         <span style={{ color: '#a78bfa' }}>
           ATS baseline {baselineAts}
         </span>
-      ) : projectedAtsDelta > 0 ? (
-        <span style={{ color: '#4ade80' }}>
-          ATS +{projectedAtsDelta} pts projected
+      )}
+      {keywordScore != null && (
+        <span style={{ color: keywordScore.matched > 0 ? '#4ade80' : '#555' }}>
+          {keywordScore.matched} / {keywordScore.total} JD keywords
         </span>
-      ) : null}
+      )}
 
       <span>
         <span style={{ color: '#fbbf24' }}>{pendingCount} pending</span>
