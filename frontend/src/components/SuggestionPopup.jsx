@@ -35,14 +35,27 @@ const S = {
     fontSize: 12,
     color: '#888',
   },
-  atsDelta: {
+  typeBadge: {
     padding: '2px 8px',
     borderRadius: 12,
-    background: 'rgba(74, 222, 128, 0.15)',
-    color: '#4ade80',
     fontWeight: 700,
-    fontSize: 12,
-    border: '1px solid rgba(74, 222, 128, 0.3)',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+  },
+  priorityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  keywordTag: {
+    padding: '1px 6px',
+    borderRadius: 4,
+    background: 'rgba(251, 191, 36, 0.12)',
+    color: '#fbbf24',
+    fontSize: 10,
+    border: '1px solid rgba(251, 191, 36, 0.25)',
   },
   closeBtn: {
     background: 'none',
@@ -167,6 +180,17 @@ export default function SuggestionPopup({
   const suggestion = suggestions[currentIndex];
   const total = suggestions.length;
 
+  const typeColors = {
+    reframe: { bg: 'rgba(96, 165, 250, 0.15)', color: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' },
+    quantify: { bg: 'rgba(74, 222, 128, 0.15)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.3)' },
+    keyword: { bg: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
+    restructure: { bg: 'rgba(167, 139, 250, 0.15)', color: '#a78bfa', border: 'rgba(167, 139, 250, 0.3)' },
+    add: { bg: 'rgba(45, 212, 191, 0.15)', color: '#2dd4bf', border: 'rgba(45, 212, 191, 0.3)' },
+    remove: { bg: 'rgba(248, 113, 113, 0.15)', color: '#f87171', border: 'rgba(248, 113, 113, 0.3)' },
+  };
+  const priorityColors = { high: '#f87171', medium: '#fbbf24', low: '#555' };
+  const tc = typeColors[suggestion.type] || typeColors.keyword;
+
   // Clamp popup position to viewport
   const POPUP_WIDTH = 520;
   const POPUP_HEIGHT = 320; // approximate
@@ -180,12 +204,23 @@ export default function SuggestionPopup({
         {/* Header */}
         <div style={S.header}>
           <div style={S.headerLeft}>
+            <span
+              style={{
+                ...S.typeBadge,
+                background: tc.bg,
+                color: tc.color,
+                border: `1px solid ${tc.border}`,
+              }}
+            >
+              {suggestion.type || 'keyword'}
+            </span>
+            <span
+              style={{ ...S.priorityDot, background: priorityColors[suggestion.priority] || '#555' }}
+              title={`${suggestion.priority || 'medium'} priority`}
+            />
             <span style={{ color: '#ccc', fontWeight: 600 }}>{suggestion.section}</span>
             <span>·</span>
             <span>Line {suggestion.line}</span>
-            {suggestion.ats_delta > 0 && (
-              <span style={S.atsDelta}>ATS +{suggestion.ats_delta} pts</span>
-            )}
           </div>
           <button style={S.closeBtn} onClick={onClose} title="Close">×</button>
         </div>
@@ -202,6 +237,13 @@ export default function SuggestionPopup({
           </div>
           {suggestion.reason && (
             <div style={S.reason}>{suggestion.reason}</div>
+          )}
+          {suggestion.jd_keywords_addressed?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {suggestion.jd_keywords_addressed.map((kw, i) => (
+                <span key={i} style={S.keywordTag}>{kw}</span>
+              ))}
+            </div>
           )}
         </div>
 

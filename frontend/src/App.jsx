@@ -5,7 +5,6 @@ import PDFPreview from './components/PDFPreview.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import { useSuggestions } from './hooks/useSuggestions.js';
 import { useUndoStack } from './hooks/useUndoStack.js';
-import { useKeywordScore } from './hooks/useKeywordScore.js';
 
 const DEFAULT_TEX = `\\documentclass[11pt]{article}
 \\usepackage{geometry}
@@ -64,9 +63,8 @@ export default function App() {
   const fileInputRef = useRef(null);
   const pdfBlobRef = useRef(null);
 
-  const { suggestions, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount } = useSuggestions();
+  const { suggestions, atsScore, scoreBreakdown, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount } = useSuggestions();
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
-  const keywordScore = useKeywordScore(jdText, resumeText);
 
   const [baselineAts, setBaselineAts] = useState(null);
 
@@ -94,7 +92,7 @@ export default function App() {
   useEffect(() => {
     fetch('/api/health')
       .then(r => r.ok ? r.json() : { ok: false })
-      .then(d => setBackendHealth({ checked: true, ok: !!d.ok, openaiConfigured: !!d.openai_configured }))
+      .then(d => setBackendHealth({ checked: true, ok: !!d.ok, openaiConfigured: !!d.deepseek_configured }))
       .catch(() => setBackendHealth({ checked: true, ok: false, openaiConfigured: false }));
 
     fetch('/api/persona')
@@ -177,37 +175,51 @@ export default function App() {
     if (!s) return;
 
     // Guard: reject suggestions with unbalanced braces (would break LaTeX)
-    const braceBalance = (str) => {
-      let depth = 0;
-      for (const ch of str) {
-        if (ch === '{') depth++;
-        else if (ch === '}') depth--;
-        if (depth < 0) return false;
+    // Skip brace check for 'remove' type (new is empty)
+    if (s.new) {
+      const braceBalance = (str) => {
+        let depth = 0;
+        for (const ch of str) {
+          if (ch === '{') depth++;
+          else if (ch === '}') depth--;
+          if (depth < 0) return false;
+        }
+        return depth === 0;
+      };
+      if (!braceBalance(s.new)) {
+        alert('This suggestion has unbalanced braces and cannot be applied safely. It has been dismissed.');
+        dismiss(suggestionIdx);
+        if (suggestions.length <= 1) setPopupState(null);
+        else setPopupState(prev => prev ? { ...prev, currentIndex: Math.min(suggestionIdx, suggestions.length - 2) } : null);
+        return;
       }
-      return depth === 0;
-    };
-    if (!braceBalance(s.new)) {
-      alert('This suggestion has unbalanced braces and cannot be applied safely. It has been dismissed.');
-      dismiss(suggestionIdx);
-      if (suggestions.length <= 1) setPopupState(null);
-      else setPopupState(prev => prev ? { ...prev, currentIndex: Math.min(suggestionIdx, suggestions.length - 2) } : null);
-      return;
     }
 
-    // Replace old text with new text in resumeText
-    const updated = resumeText.replace(s.old, () => s.new);
-    if (updated === resumeText) {
-      // Couldn't find exact match — still apply by line number
+    // Handle 'remove' type — delete the line entirely
+    if (s.type === 'remove' && !s.new) {
       const lines = resumeText.split('\n');
       const lineIdx = s.line - 1;
       if (lineIdx >= 0 && lineIdx < lines.length) {
-        lines[lineIdx] = s.new;
-        pushUndo({ old: s.old, new: s.new, line: s.line });
+        pushUndo({ old: s.old, new: '', line: s.line });
+        lines.splice(lineIdx, 1);
         setResumeText(lines.join('\n'));
       }
     } else {
-      pushUndo({ old: s.old, new: s.new, line: s.line });
-      setResumeText(updated);
+      // Replace old text with new text in resumeText
+      const updated = resumeText.replace(s.old, () => s.new);
+      if (updated === resumeText) {
+        // Couldn't find exact match — still apply by line number
+        const lines = resumeText.split('\n');
+        const lineIdx = s.line - 1;
+        if (lineIdx >= 0 && lineIdx < lines.length) {
+          lines[lineIdx] = s.new;
+          pushUndo({ old: s.old, new: s.new, line: s.line });
+          setResumeText(lines.join('\n'));
+        }
+      } else {
+        pushUndo({ old: s.old, new: s.new, line: s.line });
+        setResumeText(updated);
+      }
     }
 
     setAcceptedCount(c => c + 1);
@@ -238,7 +250,17 @@ export default function App() {
   function handleUndo() {
     const entry = popUndo();
     if (!entry) return;
-    setResumeText(prev => prev.replace(entry.new, () => entry.old));
+    if (!entry.new) {
+      // Undo a 'remove' — re-insert the deleted line
+      setResumeText(prev => {
+        const lines = prev.split('\n');
+        const insertIdx = Math.min(entry.line - 1, lines.length);
+        lines.splice(insertIdx, 0, entry.old);
+        return lines.join('\n');
+      });
+    } else {
+      setResumeText(prev => prev.replace(entry.new, () => entry.old));
+    }
     setAcceptedCount(c => Math.max(0, c - 1));
   }
 
@@ -360,7 +382,7 @@ export default function App() {
   const showHealthBanner = backendHealth.checked && (!backendHealth.ok || !backendHealth.openaiConfigured);
   const healthMessage = !backendHealth.ok
     ? '⚠ Backend not reachable on :3002 — start it with `cd backend && npm run dev`'
-    : '⚠ OPENAI_API_KEY not configured — add it to backend/.env to enable AI suggestions';
+    : '⚠ DEEPSEEK_API_KEY not configured — add it to backend/.env to enable AI suggestions';
   const healthColor = !backendHealth.ok ? '#f87171' : '#fbbf24';
   const healthBg = !backendHealth.ok ? 'rgba(248, 113, 113, 0.1)' : 'rgba(251, 191, 36, 0.1)';
 
@@ -490,7 +512,8 @@ export default function App() {
         acceptedCount={acceptedCount}
         rejectedCount={rejectedCount}
         baselineAts={baselineAts}
-        keywordScore={keywordScore}
+        atsScore={atsScore}
+        scoreBreakdown={scoreBreakdown}
         personaActive={personaActive}
         onRefreshPersona={handleRefreshPersona}
       />
