@@ -4,7 +4,8 @@ export default function StatusBar({
   pendingCount,
   acceptedCount,
   rejectedCount,
-  keywordScore,
+  atsScore,
+  scoreBreakdown,
   baselineAts,
   personaActive,
   onRefreshPersona,
@@ -12,6 +13,12 @@ export default function StatusBar({
   function formatTime(date) {
     if (!date) return null;
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function atsColor(score) {
+    if (score >= 70) return '#4ade80';
+    if (score >= 40) return '#fbbf24';
+    return '#f87171';
   }
 
   return (
@@ -39,9 +46,14 @@ export default function StatusBar({
           ATS baseline {baselineAts}
         </span>
       )}
-      {keywordScore != null && (
-        <span style={{ color: keywordScore.matched > 0 ? '#4ade80' : '#555' }}>
-          {keywordScore.matched} / {keywordScore.total} JD keywords
+      {atsScore != null && (
+        <span
+          style={{ color: atsColor(atsScore), cursor: scoreBreakdown ? 'help' : 'default' }}
+          title={scoreBreakdown
+            ? `Keywords: ${scoreBreakdown.keyword_coverage} | Experience: ${scoreBreakdown.experience_alignment} | Skills: ${scoreBreakdown.skills_match} | Format: ${scoreBreakdown.formatting_ats_safety}`
+            : undefined}
+        >
+          ATS {atsScore}/100
         </span>
       )}
 

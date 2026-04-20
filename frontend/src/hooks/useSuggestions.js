@@ -2,12 +2,16 @@ import { useState, useCallback } from 'react';
 
 export function useSuggestions() {
   const [suggestions, setSuggestions] = useState([]);
+  const [atsScore, setAtsScore] = useState(null);
+  const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'done' | 'error'
   const [error, setError] = useState(null);
 
   const fetch = useCallback(async (resumeTex, jobDescription) => {
     setStatus('loading');
     setError(null);
+    setAtsScore(null);
+    setScoreBreakdown(null);
     try {
       let res;
       try {
@@ -27,6 +31,8 @@ export function useSuggestions() {
       }
       const data = await res.json();
       setSuggestions(data.suggestions ?? []);
+      setAtsScore(data.atsScore ?? null);
+      setScoreBreakdown(data.scoreBreakdown ?? null);
       setStatus('done');
     } catch (err) {
       setError(err.message);
@@ -42,5 +48,5 @@ export function useSuggestions() {
 
   const pendingCount = suggestions.length;
 
-  return { suggestions, status, error, fetch, dismiss, dismissAll, pendingCount };
+  return { suggestions, atsScore, scoreBreakdown, status, error, fetch, dismiss, dismissAll, pendingCount };
 }
