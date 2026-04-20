@@ -52,6 +52,7 @@ fastify.register(cors, {
 fastify.get('/api/health', async () => ({
   ok: true,
   openai_configured: !!process.env.OPENAI_API_KEY,
+  deepseek_configured: !!process.env.DEEPSEEK_API_KEY,
 }));
 
 // ── /api/compile ──────────────────────────────────────────────────────────────
@@ -81,10 +82,9 @@ fastify.post<{ Body: { resumeTex: string; jobDescription: string } }>(
       return reply.status(400).send({ error: 'Missing resumeTex or jobDescription' });
     }
     try {
-      const openai = getOpenAI();
       const persona = await getPersona();
-      const suggestions = await generateSuggestions(resumeTex, jobDescription, persona, openai);
-      reply.send({ suggestions });
+      const result = await generateSuggestions(resumeTex, jobDescription, persona);
+      reply.send(result);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       reply.status(500).send({ error: msg });
