@@ -52,7 +52,6 @@ fastify.register(cors, {
 fastify.get('/api/health', async () => ({
   ok: true,
   openai_configured: !!process.env.OPENAI_API_KEY,
-  deepseek_configured: !!process.env.DEEPSEEK_API_KEY,
 }));
 
 // ── /api/compile ──────────────────────────────────────────────────────────────
