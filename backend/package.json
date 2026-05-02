@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "nodemon --exec ts-node src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:suggest": "curl -sS -X POST http://localhost:3002/api/suggest -H 'Content-Type: application/json' -d @fixtures/suggest-smoke.json | node scripts/validate-suggest-response.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
@@ -17,6 +20,7 @@
     "@types/node": "^22.0.0",
     "nodemon": "^3.1.7",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.0"
   }
 }

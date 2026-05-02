@@ -1,17 +1,15 @@
 import OpenAI from 'openai';
+import {
+  type Suggestion,
+  MAX_SUGGESTIONS_RETURNED,
+  isProtectedLine,
+  reconcileLineNumbers,
+  validateSuggestions,
+  rankAndCap,
+} from './suggestPipeline';
 
-// ── Interfaces ────────────────────────────────────────────────────────────────
-
-export interface Suggestion {
-  type: 'reframe' | 'quantify' | 'keyword' | 'restructure' | 'add' | 'remove';
-  priority: 'high' | 'medium' | 'low';
-  section: string;
-  line: number;
-  old: string;
-  new: string;
-  reason: string;
-  jd_keywords_addressed: string[];
-}
+export type { Suggestion } from './suggestPipeline';
+export { MAX_SUGGESTIONS_RETURNED } from './suggestPipeline';
 
 export interface SuggestionResult {
   suggestions: Suggestion[];
@@ -24,8 +22,6 @@ export interface SuggestionResult {
   };
 }
 
-// ── OpenAI Client ────────────────────────────────────────────────────────────
-
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!process.env.OPENAI_API_KEY) {
@@ -37,82 +33,6 @@ function getOpenAI(): OpenAI {
   return _openai;
 }
 
-// ── Heading Protection ───────────────────────────────────────────────────────
-
-const PROTECTED_PATTERNS = [
-  /^\\section\*?\{/,
-  /^\\subsection\*?\{/,
-  /^\\begin\{document\}/,
-  /^\\end\{document\}/,
-  /^\\documentclass/,
-  /^\\usepackage/,
-  /^\\input\{/,
-  /^\\newcommand/,
-  /^\\renewcommand/,
-  /^\\def\\/,
-];
-
-function isProtectedLine(line: string): boolean {
-  const trimmed = line.trim();
-  return PROTECTED_PATTERNS.some(p => p.test(trimmed));
-}
-
-// ── Post-Validation ──────────────────────────────────────────────────────────
-
-function validateSuggestions(suggestions: Suggestion[], resumeLines: string[]): Suggestion[] {
-  return suggestions.filter(s => {
-    // Reject if targeting a protected line
-    if (s.line > 0 && s.line <= resumeLines.length && isProtectedLine(resumeLines[s.line - 1])) {
-      return false;
-    }
-    // Reject if old contains section headings being changed
-    if (/\\section\*?\{/.test(s.old)) {
-      const oldHeading = s.old.match(/\\section\*?\{(.+?)\}/)?.[1];
-      const newHeading = s.new.match(/\\section\*?\{(.+?)\}/)?.[1];
-      if (oldHeading !== newHeading) return false;
-    }
-    return true;
-  });
-}
-
-// ── Line Number Reconciliation ───────────────────────────────────────────────
-
-function reconcileLineNumbers(suggestions: Suggestion[], resumeLines: string[]): Suggestion[] {
-  const result: Suggestion[] = [];
-
-  for (const s of suggestions) {
-    const oldText = s.old;
-    if (!oldText && s.type !== 'add') continue;
-    if (!s.new && s.type !== 'remove') continue;
-
-    let lineNum = 0;
-
-    // Try exact substring match
-    const exactIdx = resumeLines.findIndex(l => l.includes(oldText));
-    if (exactIdx >= 0) {
-      lineNum = exactIdx + 1;
-    } else {
-      // Try partial match of first non-empty segment
-      const oldFirstLine = oldText.split('\n').find(l => l.trim().length > 0) ?? oldText;
-      const partialIdx = resumeLines.findIndex(l => l.includes(oldFirstLine.trim()));
-      if (partialIdx >= 0) {
-        lineNum = partialIdx + 1;
-      } else {
-        // Fall back to model-provided line number if valid
-        lineNum = s.line > 0 && s.line <= resumeLines.length ? s.line : 0;
-      }
-    }
-
-    if (lineNum === 0) continue;
-
-    result.push({ ...s, line: lineNum });
-  }
-
-  return result;
-}
-
-// ── Main Pipeline (Single Call) ──────────────────────────────────────────────
-
 export async function generateSuggestions(
   resumeTex: string,
   jobDescription: string,
@@ -121,7 +41,6 @@ export async function generateSuggestions(
   const openai = getOpenAI();
   const lines = resumeTex.split('\n');
 
-  // Build numbered resume with PROTECTED markers
   const numberedResume = lines
     .map((line, i) => {
       const prefix = `${i + 1}: `;
@@ -143,7 +62,7 @@ Perform the following in a single pass:
 
 1. ANALYZE the job description: identify role type, seniority, must-have skills, and ATS keywords.
 2. AUDIT the resume against the JD: score keyword coverage (0-100), experience alignment (0-100), skills match (0-100), and formatting ATS safety (0-100).
-3. GENERATE targeted suggestions to improve the resume's match to this specific role.
+3. GENERATE the highest-impact suggestions to improve the resume's match to this specific role. You may list many candidates in JSON; the server will keep the top ${MAX_SUGGESTIONS_RETURNED} by priority and JD keyword coverage after validating LaTeX safety.
 
 Suggestion types:
 | Type | Use when |
@@ -158,11 +77,11 @@ Suggestion types:
 === CRITICAL RULES ===
 - Lines marked [PROTECTED] must NEVER be modified or appear in the "old" field
 - "old" must be the EXACT original line text, character-for-character (copy from the resume above, excluding the line number prefix and [PROTECTED] marker)
-- "new" must preserve the EXACT same LaTeX commands and structure as "old" — only change the content words
+- "new" must preserve the EXACT same LaTeX commands and structure as "old" — only change the content words (add/remove types: follow same command safety for the line you touch)
 - Never introduce LaTeX commands not already present in the original line
 - For "remove" type: set "new" to ""
 - Each suggestion must reference specific JD keywords it addresses
-- Address ALL high-priority gaps — do not artificially cap the count
+- Prioritize the most impactful edits first (high priority, more jd_keywords_addressed) — the API returns at most ${MAX_SUGGESTIONS_RETURNED} suggestions after ranking
 - Do NOT modify section headings (\\section*, \\subsection*)
 
 === OUTPUT FORMAT (respond with ONLY this JSON, no other text) ===
@@ -214,7 +133,6 @@ Suggestion types:
     return { suggestions: [], atsScore: 0, scoreBreakdown: { keyword_coverage: 0, experience_alignment: 0, skills_match: 0, formatting_ats_safety: 0 } };
   }
 
-  // Extract ATS score
   const atsScore = typeof parsed.atsScore === 'number' ? parsed.atsScore : 0;
   const breakdown = parsed.scoreBreakdown as Record<string, number> | undefined;
   const scoreBreakdown = {
@@ -224,12 +142,10 @@ Suggestion types:
     formatting_ats_safety: breakdown?.formatting_ats_safety ?? 0,
   };
 
-  // Extract suggestions array
   let rawSuggestions: unknown[] = [];
   if (Array.isArray(parsed.suggestions)) {
     rawSuggestions = parsed.suggestions;
   } else {
-    // Search for any array in the response
     for (const v of Object.values(parsed)) {
       if (Array.isArray(v)) {
         rawSuggestions = v;
@@ -238,7 +154,6 @@ Suggestion types:
     }
   }
 
-  // Parse and validate suggestion types
   const validTypes = new Set(['reframe', 'quantify', 'keyword', 'restructure', 'add', 'remove']);
   const validPriorities = new Set(['high', 'medium', 'low']);
 
@@ -246,8 +161,8 @@ Suggestion types:
     .map((item) => {
       const s = item as Record<string, unknown>;
       return {
-        type: validTypes.has(String(s.type)) ? String(s.type) as Suggestion['type'] : 'keyword',
-        priority: validPriorities.has(String(s.priority)) ? String(s.priority) as Suggestion['priority'] : 'medium',
+        type: validTypes.has(String(s.type)) ? (String(s.type) as Suggestion['type']) : 'keyword',
+        priority: validPriorities.has(String(s.priority)) ? (String(s.priority) as Suggestion['priority']) : 'medium',
         section: String(s.section ?? 'Resume'),
         line: typeof s.line === 'number' ? s.line : 0,
         old: String(s.old ?? ''),
@@ -260,13 +175,13 @@ Suggestion types:
     })
     .filter(s => (s.old || s.type === 'add') && (s.new || s.type === 'remove'));
 
-  // Reconcile line numbers against actual resume content
   const reconciled = reconcileLineNumbers(suggestions, lines);
+  const passed = validateSuggestions(reconciled, lines);
+  const ranked = rankAndCap(passed, MAX_SUGGESTIONS_RETURNED);
 
-  // Post-validate: reject heading mutations and protected line modifications
-  const validated = validateSuggestions(reconciled, lines);
+  console.log(
+    `[suggest] ${ranked.length} suggestions returned (raw=${rawSuggestions.length}, validated=${passed.length}, cap=${MAX_SUGGESTIONS_RETURNED})`
+  );
 
-  console.log(`[suggest] ${validated.length} suggestions validated (${rawSuggestions.length} raw, ${rawSuggestions.length - validated.length} filtered)`);
-
-  return { suggestions: validated, atsScore, scoreBreakdown };
+  return { suggestions: ranked, atsScore, scoreBreakdown };
 }

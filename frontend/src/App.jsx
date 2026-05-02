@@ -205,20 +205,49 @@ export default function App() {
         setResumeText(lines.join('\n'));
       }
     } else {
-      // Replace old text with new text in resumeText
-      const updated = resumeText.replace(s.old, () => s.new);
-      if (updated === resumeText) {
-        // Couldn't find exact match — still apply by line number
-        const lines = resumeText.split('\n');
-        const lineIdx = s.line - 1;
-        if (lineIdx >= 0 && lineIdx < lines.length) {
+      const lines = resumeText.split('\n');
+      const lineIdx = s.line - 1;
+      const lineInRange = lineIdx >= 0 && lineIdx < lines.length;
+      const lineText = lineInRange ? lines[lineIdx] : '';
+
+      // Prefer scoped edit on the reconciled line when `old` matches that line (avoids wrong first global match)
+      if (s.old && lineInRange) {
+        if (lineText === s.old) {
           lines[lineIdx] = s.new;
+          pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
+          setResumeText(lines.join('\n'));
+        } else if (lineText.includes(s.old)) {
+          const nextLine = lineText.replace(s.old, () => s.new);
+          if (nextLine !== lineText) {
+            lines[lineIdx] = nextLine;
+            pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
+            setResumeText(lines.join('\n'));
+          }
+        } else {
+          const updated = resumeText.replace(s.old, () => s.new);
+          if (updated !== resumeText) {
+            pushUndo({ old: s.old, new: s.new, line: s.line });
+            setResumeText(updated);
+          } else if (lineInRange) {
+            lines[lineIdx] = s.new;
+            pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
+            setResumeText(lines.join('\n'));
+          }
+        }
+      } else if (!s.old && lineInRange) {
+        lines[lineIdx] = s.new;
+        pushUndo({ line: s.line, lineUndoBefore: lineText, old: '', new: s.new });
+        setResumeText(lines.join('\n'));
+      } else if (s.old) {
+        const updated = resumeText.replace(s.old, () => s.new);
+        if (updated !== resumeText) {
           pushUndo({ old: s.old, new: s.new, line: s.line });
+          setResumeText(updated);
+        } else if (lineInRange) {
+          lines[lineIdx] = s.new;
+          pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
           setResumeText(lines.join('\n'));
         }
-      } else {
-        pushUndo({ old: s.old, new: s.new, line: s.line });
-        setResumeText(updated);
       }
     }
 
@@ -256,6 +285,13 @@ export default function App() {
         const lines = prev.split('\n');
         const insertIdx = Math.min(entry.line - 1, lines.length);
         lines.splice(insertIdx, 0, entry.old);
+        return lines.join('\n');
+      });
+    } else if (entry.lineUndoBefore != null && entry.line != null) {
+      setResumeText(prev => {
+        const lines = prev.split('\n');
+        const i = entry.line - 1;
+        if (i >= 0 && i < lines.length) lines[i] = entry.lineUndoBefore;
         return lines.join('\n');
       });
     } else {
