@@ -46,6 +46,15 @@ JavaScript, TypeScript, React, Node.js, PostgreSQL, Git, Docker
 
 \\end{document}`;
 
+function slugifyProfileName(name) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'profile';
+}
+
 export default function App() {
   const [resumeText, setResumeText] = useState(DEFAULT_TEX);
   const [fileName, setFileName] = useState('resume.tex');
@@ -68,31 +77,85 @@ export default function App() {
 
   const [baselineAts, setBaselineAts] = useState(null);
 
-  // On load: read ?jd= and ?ats= URL params, and fetch uploaded resume from job tracker
+  const [profiles, setProfiles] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [activeProfileSlug, setActiveProfileSlug] = useState(null);
+  const [activeProfileName, setActiveProfileName] = useState('');
+  const [profileRoleType, setProfileRoleType] = useState('');
+  const [profileDescription, setProfileDescription] = useState('');
+  const [profileNotice, setProfileNotice] = useState(null);
+  const [autoDetectLoading, setAutoDetectLoading] = useState(false);
+
+  const refreshProfileList = useCallback(async () => {
+    try {
+      const r = await fetch('/api/profiles');
+      if (!r.ok) return [];
+      const d = await r.json();
+      const list = d.profiles ?? [];
+      setProfiles(list);
+      return list;
+    } catch {
+      setProfiles([]);
+      return [];
+    }
+  }, []);
+
+  const loadProfileBySlug = useCallback(async (slug) => {
+    if (!slug) return;
+    try {
+      const r = await fetch(`/api/profiles/${encodeURIComponent(slug)}`);
+      if (!r.ok) throw new Error('Failed to load profile');
+      const d = await r.json();
+      setActiveProfileSlug(d.slug);
+      setActiveProfileName(d.name ?? slug);
+      setProfileRoleType(d.roleType ?? '');
+      setProfileDescription(d.description ?? '');
+      setResumeText(typeof d.tex === 'string' ? d.tex : '');
+      setFileName(`${(d.name ?? slug).replace(/\s+/g, '-')}.tex`);
+    } catch {
+      setProfileNotice('Could not load that profile.');
+    }
+  }, []);
+
+  // Optional ?ats= from external links (job tracker). Job description is never loaded from URL —
+  // users paste a fresh JD per application below (session-only, not saved).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const jd = params.get('jd');
-    if (jd) setJdText(jd);
     const ats = params.get('ats');
     if (ats) setBaselineAts(parseInt(ats, 10));
-
-    // Try to load the resume uploaded in the Job Tracker
-    fetch('http://localhost:8000/api/resume')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.uploaded && data.resumeText?.trim()) {
-          setResumeText(data.resumeText.trim());
-          if (data.filename) setFileName(data.filename);
-        }
-      })
-      .catch(() => { /* job tracker not running, keep default template */ });
   }, []);
+
+  // Load saved profiles first. Job-tracker resume import runs only when there are no profiles.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setProfilesLoading(true);
+      const list = await refreshProfileList();
+      if (cancelled) return;
+      setProfilesLoading(false);
+      if (list.length > 0) {
+        await loadProfileBySlug(list[0].slug);
+      } else {
+        fetch('http://localhost:8000/api/resume')
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (cancelled) return;
+            if (data?.uploaded && data.resumeText?.trim()) {
+              setResumeText(data.resumeText.trim());
+              if (data.filename) setFileName(data.filename);
+            }
+          })
+          .catch(() => {});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshProfileList, loadProfileBySlug]);
 
   // On load: ping backend health and check persona
   useEffect(() => {
     fetch('/api/health')
       .then(r => r.ok ? r.json() : { ok: false })
-      .then(d => setBackendHealth({ checked: true, ok: !!d.ok, openaiConfigured: !!d.deepseek_configured }))
+      .then(d => setBackendHealth({ checked: true, ok: !!d.ok, openaiConfigured: !!d.openai_configured }))
       .catch(() => setBackendHealth({ checked: true, ok: false, openaiConfigured: false }));
 
     fetch('/api/persona')
@@ -110,6 +173,142 @@ export default function App() {
     reader.onload = ev => setResumeText(ev.target.result ?? '');
     reader.readAsText(file);
     e.target.value = '';
+  }
+
+  function handleProfileSelectChange(e) {
+    const slug = e.target.value;
+    if (!slug) return;
+    setProfileNotice(null);
+    loadProfileBySlug(slug);
+  }
+
+  async function handleSaveProfile() {
+    setProfileNotice(null);
+    const name = (activeProfileName || '').trim();
+    if (!name) {
+      setProfileNotice('Enter a profile name before saving.');
+      return;
+    }
+    let slug = activeProfileSlug;
+    if (!slug) {
+      const list = await refreshProfileList();
+      let base = slugifyProfileName(name);
+      slug = base;
+      let n = 2;
+      while (list.some(p => p.slug === slug)) {
+        slug = `${base}-${n++}`;
+      }
+    }
+    try {
+      const r = await fetch(`/api/profiles/${encodeURIComponent(slug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          roleType: profileRoleType,
+          description: profileDescription,
+          tex: resumeText,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? 'Save failed');
+      await refreshProfileList();
+      await loadProfileBySlug(d.slug ?? slug);
+      setProfileNotice('Profile saved.');
+    } catch (err) {
+      setProfileNotice(err.message ?? String(err));
+    }
+  }
+
+  async function handleNewProfile() {
+    setProfileNotice(null);
+    const name = window.prompt('New profile name (e.g. AI Engineering):');
+    if (!name?.trim()) return;
+    const roleType = window.prompt('Role type (helps auto-detect):', '') ?? '';
+    const description = window.prompt('Short description for auto-detect (optional):', '') ?? '';
+    const list = await refreshProfileList();
+    let base = slugifyProfileName(name);
+    let slug = base;
+    let n = 2;
+    while (list.some(p => p.slug === slug)) {
+      slug = `${base}-${n++}`;
+    }
+    try {
+      const r = await fetch(`/api/profiles/${encodeURIComponent(slug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          roleType,
+          description,
+          tex: resumeText,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? 'Create failed');
+      await refreshProfileList();
+      await loadProfileBySlug(d.slug ?? slug);
+      setProfileNotice('New profile created from the current editor.');
+    } catch (err) {
+      setProfileNotice(err.message ?? String(err));
+    }
+  }
+
+  async function handleAutoDetectProfile() {
+    if (!jdText.trim()) {
+      setProfileNotice('Paste a job description first, then run auto-detect.');
+      return;
+    }
+    setProfileNotice(null);
+    setAutoDetectLoading(true);
+    try {
+      const r = await fetch('/api/profiles/auto-detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobDescription: jdText }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? 'Auto-detect failed');
+      if (d.slug) {
+        await loadProfileBySlug(d.slug);
+        setProfileNotice(
+          `Using “${d.slug}” (${d.confidence ?? 0}% confidence). ${d.reasoning || ''}`.trim()
+        );
+      } else {
+        setProfileNotice(d.reasoning || 'No profile matched this job description.');
+      }
+    } catch (err) {
+      setProfileNotice(err.message ?? String(err));
+    } finally {
+      setAutoDetectLoading(false);
+    }
+  }
+
+  async function handleDeleteProfile() {
+    if (!activeProfileSlug) return;
+    if (!window.confirm(`Delete profile “${activeProfileName || activeProfileSlug}” permanently?`)) return;
+    setProfileNotice(null);
+    try {
+      const r = await fetch(`/api/profiles/${encodeURIComponent(activeProfileSlug)}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error ?? 'Delete failed');
+      }
+      const list = await refreshProfileList();
+      setProfileNotice('Profile deleted.');
+      if (list.length > 0) {
+        await loadProfileBySlug(list[0].slug);
+      } else {
+        setActiveProfileSlug(null);
+        setActiveProfileName('');
+        setProfileRoleType('');
+        setProfileDescription('');
+        setResumeText(DEFAULT_TEX);
+        setFileName('resume.tex');
+      }
+    } catch (err) {
+      setProfileNotice(err.message ?? String(err));
+    }
   }
 
   // ── Compile ─────────────────────────────────────────────────────────────────
@@ -142,8 +341,16 @@ export default function App() {
 
   // ── Suggest ─────────────────────────────────────────────────────────────────
   async function handleSuggest() {
+    if (!activeProfileSlug) {
+      alert(
+        'Choose a saved resume profile in the dropdown above (or click + New to create one). Suggestions combine that resume with the job description below.'
+      );
+      return;
+    }
     if (!jdText.trim()) {
-      alert('Please paste a job description first.');
+      alert(
+        'Paste this employer’s job description in the Job description box below. It is only used for this run and is not saved.'
+      );
       return;
     }
     dismissAll();
@@ -173,27 +380,6 @@ export default function App() {
   function handleKeepNew(suggestionIdx) {
     const s = suggestions[suggestionIdx];
     if (!s) return;
-
-    // Guard: reject suggestions with unbalanced braces (would break LaTeX)
-    // Skip brace check for 'remove' type (new is empty)
-    if (s.new) {
-      const braceBalance = (str) => {
-        let depth = 0;
-        for (const ch of str) {
-          if (ch === '{') depth++;
-          else if (ch === '}') depth--;
-          if (depth < 0) return false;
-        }
-        return depth === 0;
-      };
-      if (!braceBalance(s.new)) {
-        alert('This suggestion has unbalanced braces and cannot be applied safely. It has been dismissed.');
-        dismiss(suggestionIdx);
-        if (suggestions.length <= 1) setPopupState(null);
-        else setPopupState(prev => prev ? { ...prev, currentIndex: Math.min(suggestionIdx, suggestions.length - 2) } : null);
-        return;
-      }
-    }
 
     // Handle 'remove' type — delete the line entirely
     if (s.type === 'remove' && !s.new) {
@@ -322,79 +508,116 @@ export default function App() {
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────────
+  const labelMuted = '#8b92a8';
   const S = {
     root: {
       display: 'flex',
       flexDirection: 'column',
       height: '100vh',
-      background: '#0d0d1a',
-      color: '#cdd6f4',
+      background: '#0c0c18',
+      color: '#dce1f0',
     },
     toolbar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '6px 12px',
-      borderBottom: '1px solid #1a1a2e',
-      background: '#11111f',
+      gap: 10,
+      padding: '8px 14px',
+      borderBottom: '1px solid rgba(99, 102, 241, 0.12)',
+      background: 'linear-gradient(180deg, #12121f 0%, #10101c 100%)',
+      boxShadow: '0 1px 0 rgba(255, 255, 255, 0.03)',
       flexShrink: 0,
     },
     fileName: {
       fontSize: 13,
-      color: '#888',
+      color: '#9ca8c9',
       marginRight: 4,
+      fontWeight: 500,
+      letterSpacing: '-0.01em',
     },
     pill: {
-      padding: '3px 10px',
-      borderRadius: 12,
-      fontSize: 12,
+      padding: '4px 11px',
+      borderRadius: 999,
+      fontSize: 11,
       fontWeight: 600,
-      background: 'rgba(251, 191, 36, 0.15)',
-      color: '#fbbf24',
-      border: '1px solid rgba(251, 191, 36, 0.3)',
+      background: 'rgba(251, 191, 36, 0.12)',
+      color: '#fcd34d',
+      border: '1px solid rgba(251, 191, 36, 0.28)',
+      letterSpacing: '0.02em',
     },
     btn: {
-      padding: '4px 12px',
-      borderRadius: 6,
-      border: '1px solid #2d2d4a',
-      background: '#1a1a2e',
-      color: '#ccc',
+      padding: '5px 13px',
+      borderRadius: 8,
+      border: '1px solid rgba(99, 102, 241, 0.22)',
+      background: 'rgba(26, 26, 46, 0.9)',
+      color: '#d4d8e8',
       cursor: 'pointer',
       fontSize: 12,
       fontWeight: 500,
+      transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
     },
     btnPrimary: {
-      padding: '4px 12px',
-      borderRadius: 6,
+      padding: '5px 14px',
+      borderRadius: 8,
       border: 'none',
-      background: '#4f46e5',
+      background: 'linear-gradient(180deg, #6366f1 0%, #4f46e5 100%)',
       color: '#fff',
       cursor: 'pointer',
       fontSize: 12,
       fontWeight: 600,
+      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+      transition: 'filter 0.15s ease, opacity 0.15s ease',
+    },
+    profileBar: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 8,
+      padding: '8px 14px',
+      borderBottom: '1px solid rgba(99, 102, 241, 0.1)',
+      background: '#11111d',
+      flexShrink: 0,
+    },
+    profileSelect: {
+      minWidth: 140,
+      maxWidth: 220,
+      padding: '5px 10px',
+      borderRadius: 8,
+      border: '1px solid rgba(99, 102, 241, 0.25)',
+      background: '#18182a',
+      color: '#e8eaf5',
+      fontSize: 12,
+    },
+    profileField: {
+      padding: '5px 10px',
+      borderRadius: 8,
+      border: '1px solid rgba(99, 102, 241, 0.22)',
+      background: '#18182a',
+      color: '#e8eaf5',
+      fontSize: 12,
+      outline: 'none',
     },
     jdBar: {
       display: 'flex',
-      alignItems: 'flex-start',
-      gap: 8,
-      padding: '6px 12px',
-      borderBottom: '1px solid #1a1a2e',
-      background: '#0f0f1c',
+      alignItems: 'stretch',
+      gap: 10,
+      padding: '8px 14px',
+      borderBottom: '1px solid rgba(99, 102, 241, 0.1)',
+      background: '#0e0e18',
       flexShrink: 0,
     },
     jdInput: {
       flex: 1,
-      background: '#1a1a2e',
-      border: '1px solid #2d2d4a',
-      borderRadius: 6,
-      color: '#cdd6f4',
+      background: '#18182a',
+      border: '1px solid rgba(99, 102, 241, 0.22)',
+      borderRadius: 8,
+      color: '#e8eaf5',
       fontSize: 12,
-      padding: '5px 10px',
+      padding: '8px 12px',
       outline: 'none',
       resize: 'vertical',
-      minHeight: 72,
+      minHeight: 76,
       fontFamily: 'inherit',
-      lineHeight: 1.5,
+      lineHeight: 1.55,
     },
     editorArea: {
       flex: 1,
@@ -418,12 +641,32 @@ export default function App() {
   const showHealthBanner = backendHealth.checked && (!backendHealth.ok || !backendHealth.openaiConfigured);
   const healthMessage = !backendHealth.ok
     ? '⚠ Backend not reachable on :3002 — start it with `cd backend && npm run dev`'
-    : '⚠ DEEPSEEK_API_KEY not configured — add it to backend/.env to enable AI suggestions';
+    : '⚠ OPENAI_API_KEY not configured — add it to backend/.env to enable AI suggestions';
   const healthColor = !backendHealth.ok ? '#f87171' : '#fbbf24';
   const healthBg = !backendHealth.ok ? 'rgba(248, 113, 113, 0.1)' : 'rgba(251, 191, 36, 0.1)';
 
+  const profileNoticePositive =
+    profileNotice &&
+    /^(Profile saved\.|New profile created|Profile deleted\.|Using “)/.test(profileNotice);
+
   return (
     <div style={S.root}>
+      <style>{`
+        .app-btn:not(:disabled):hover {
+          background: rgba(36, 36, 58, 0.98);
+          border-color: rgba(129, 140, 248, 0.4);
+          color: #f0f2f8;
+        }
+        .app-btn:disabled {
+          cursor: not-allowed;
+        }
+        .app-btn-primary:not(:disabled):hover {
+          filter: brightness(1.07);
+        }
+        .app-btn-primary:disabled {
+          cursor: not-allowed;
+        }
+      `}</style>
       {/* Health Banner */}
       {showHealthBanner && (
         <div style={{
@@ -443,7 +686,7 @@ export default function App() {
       <div style={S.toolbar}>
         <span style={S.fileName}>{fileName}</span>
 
-        <button style={S.btn} onClick={() => fileInputRef.current?.click()}>Open .tex</button>
+        <button type="button" className="app-btn" style={S.btn} onClick={() => fileInputRef.current?.click()}>Open .tex</button>
         <input
           ref={fileInputRef}
           type="file"
@@ -458,50 +701,175 @@ export default function App() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button
+            type="button"
+            className="app-btn"
             style={{ ...S.btn, opacity: canUndo ? 1 : 0.4 }}
             disabled={!canUndo}
             onClick={handleUndo}
             title="Undo last accepted suggestion"
           >
-            ↩ Undo
+            Undo
           </button>
 
           <button
-            style={{ ...S.btn, color: showPDF ? '#a78bfa' : '#ccc' }}
+            type="button"
+            className="app-btn"
+            style={{
+              ...S.btn,
+              color: showPDF ? '#c4b5fd' : '#d4d8e8',
+              borderColor: showPDF ? 'rgba(167, 139, 250, 0.45)' : S.btn.border,
+              background: showPDF ? 'rgba(91, 33, 182, 0.2)' : S.btn.background,
+            }}
             onClick={() => setShowPDF(v => !v)}
           >
-            {showPDF ? 'Hide PDF' : 'PDF Preview'}
+            {showPDF ? 'Hide PDF' : 'PDF preview'}
           </button>
 
           <button
+            type="button"
+            className="app-btn"
             style={{ ...S.btn, opacity: compileStatus === 'compiling' ? 0.6 : 1 }}
             disabled={compileStatus === 'compiling'}
             onClick={handleCompile}
           >
-            {compileStatus === 'compiling' ? 'Compiling…' : '⬡ Compile'}
+            {compileStatus === 'compiling' ? 'Compiling…' : 'Compile'}
           </button>
         </div>
       </div>
 
+      {/* Saved resume variants (LaTeX). Job postings are pasted below — not here. */}
+      <div style={S.profileBar}>
+        <span style={{ fontSize: 12, color: labelMuted, whiteSpace: 'nowrap', fontWeight: 600 }} title="Saved .tex per role">
+          Resume profile
+        </span>
+        <select
+          style={S.profileSelect}
+          value={activeProfileSlug && profiles.some(p => p.slug === activeProfileSlug) ? activeProfileSlug : ''}
+          onChange={handleProfileSelectChange}
+          disabled={profilesLoading || profiles.length === 0}
+        >
+          {profiles.length === 0 ? (
+            <option value="">No saved profiles yet</option>
+          ) : (
+            profiles.map(p => (
+              <option key={p.slug} value={p.slug}>{p.name}</option>
+            ))
+          )}
+        </select>
+        <input
+          type="text"
+          style={{ ...S.profileField, width: 140 }}
+          placeholder="Name"
+          value={activeProfileName}
+          onChange={e => setActiveProfileName(e.target.value)}
+          disabled={profilesLoading}
+        />
+        <input
+          type="text"
+          style={{ ...S.profileField, width: 120 }}
+          placeholder="Role type"
+          value={profileRoleType}
+          onChange={e => setProfileRoleType(e.target.value)}
+          disabled={profilesLoading}
+        />
+        <input
+          type="text"
+          style={{ ...S.profileField, flex: '1 1 120px', minWidth: 100 }}
+          placeholder="About this resume (optional)"
+          title="Short notes about this resume variant (e.g. “MLE, PyTorch”). Helps Auto-detect match your profiles to the job description below. This is NOT the employer’s job posting."
+          value={profileDescription}
+          onChange={e => setProfileDescription(e.target.value)}
+          disabled={profilesLoading}
+        />
+        <button
+          type="button"
+          className="app-btn"
+          style={{ ...S.btn, opacity: autoDetectLoading ? 0.6 : 1 }}
+          disabled={autoDetectLoading || profiles.length === 0}
+          onClick={handleAutoDetectProfile}
+          title="Uses the Job description box below to pick which saved profile fits best"
+        >
+          {autoDetectLoading ? '…' : 'Auto-detect'}
+        </button>
+        <button type="button" className="app-btn" style={S.btn} onClick={handleNewProfile} disabled={profilesLoading}>
+          New profile
+        </button>
+        <button type="button" className="app-btn app-btn-primary" style={S.btnPrimary} onClick={handleSaveProfile} disabled={profilesLoading}>
+          Save
+        </button>
+        <button
+          type="button"
+          className="app-btn"
+          style={{ ...S.btn, opacity: activeProfileSlug ? 1 : 0.45 }}
+          disabled={!activeProfileSlug}
+          onClick={handleDeleteProfile}
+        >
+          Delete
+        </button>
+      </div>
+      {profileNotice && (
+        <div
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            color: profileNoticePositive ? '#86efac' : '#a8b3cc',
+            borderBottom: '1px solid rgba(99, 102, 241, 0.1)',
+            background: profileNoticePositive ? 'rgba(34, 197, 94, 0.08)' : '#11111d',
+          }}
+        >
+          {profileNotice}
+        </div>
+      )}
+
+      <div style={{
+        padding: '8px 14px 6px',
+        fontSize: 11,
+        color: '#7c8498',
+        lineHeight: 1.5,
+        borderBottom: '1px solid rgba(99, 102, 241, 0.08)',
+        background: '#0e0e18',
+      }}>
+        Profiles store your resume variants long-term. Paste each company’s job posting only in <strong style={{ color: '#a8b3cc', fontWeight: 600 }}>Job description</strong> below — it stays in this browser session and is not saved with your profile.
+      </div>
+
       {/* JD Bar */}
-      <div style={S.jdBar}>
-        <span style={{ fontSize: 12, color: '#555', whiteSpace: 'nowrap', paddingTop: 6 }}>Job Description</span>
+      <div style={{ ...S.jdBar, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 12, color: labelMuted, whiteSpace: 'nowrap', paddingTop: 9, fontWeight: 600 }} title="Not saved — paste a fresh posting per application">
+          Job description
+        </span>
         <textarea
           style={S.jdInput}
           rows={4}
-          placeholder="Paste the full job description here…"
+          placeholder="Paste this employer’s posting here for this application only (not saved). Pick the resume profile above, then Suggest."
           value={jdText}
           onChange={e => setJdText(e.target.value)}
         />
         <button
+          type="button"
+          className="app-btn app-btn-primary"
           style={{
             ...S.btnPrimary,
-            opacity: suggestStatus === 'loading' ? 0.6 : 1,
+            alignSelf: 'flex-start',
+            marginTop: 2,
+            minWidth: 108,
+            opacity:
+              suggestStatus === 'loading' || !activeProfileSlug || !jdText.trim()
+                ? 0.55
+                : 1,
           }}
-          disabled={suggestStatus === 'loading'}
+          disabled={
+            suggestStatus === 'loading' || !activeProfileSlug || !jdText.trim()
+          }
           onClick={handleSuggest}
+          title={
+            !activeProfileSlug
+              ? 'Select or create a resume profile first'
+              : !jdText.trim()
+                ? 'Paste the job description for this application'
+                : 'Run AI suggestions for this profile + JD'
+          }
         >
-          {suggestStatus === 'loading' ? '⟳ Analyzing…' : '✨ Suggest'}
+          {suggestStatus === 'loading' ? 'Analyzing…' : 'Suggest'}
         </button>
       </div>
 
@@ -542,6 +910,7 @@ export default function App() {
 
       {/* Status Bar */}
       <StatusBar
+        activeProfileName={activeProfileSlug ? activeProfileName : undefined}
         fileName={fileName}
         lastCompileTime={lastCompileTime}
         pendingCount={pendingCount}

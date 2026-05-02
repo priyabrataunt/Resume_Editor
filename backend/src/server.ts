@@ -7,6 +7,13 @@ import OpenAI from 'openai';
 import { compileLatex } from './compile';
 import { generateSuggestions } from './suggest';
 import { getPersona, distillPersona } from './persona';
+import {
+  listProfiles,
+  getProfile,
+  saveProfile,
+  deleteProfile,
+  autoDetectProfile,
+} from './profiles';
 
 // Load env from local .env first
 loadEnv();
@@ -45,7 +52,7 @@ const fastify = Fastify({
 
 fastify.register(cors, {
   origin: true, // dev: allow any origin (Vite proxy + direct curl both work)
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 });
 
 // ── /api/health ───────────────────────────────────────────────────────────────
@@ -68,6 +75,87 @@ fastify.post<{ Body: { tex: string } }>('/api/compile', async (req, reply) => {
       .send(pdfBuffer);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    reply.status(500).send({ error: msg });
+  }
+});
+
+// ── /api/profiles (list + auto-detect before :slug routes) ────────────────────
+fastify.get('/api/profiles', async (_req, reply) => {
+  try {
+    const profiles = await listProfiles();
+    reply.send({ profiles });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    reply.status(500).send({ error: msg });
+  }
+});
+
+fastify.post<{ Body: { jobDescription?: string } }>(
+  '/api/profiles/auto-detect',
+  async (req, reply) => {
+    const jobDescription = req.body?.jobDescription?.trim() ?? '';
+    if (!jobDescription) {
+      return reply.status(400).send({ error: 'Missing jobDescription' });
+    }
+    try {
+      const openai = getOpenAI();
+      const result = await autoDetectProfile(jobDescription, openai);
+      reply.send(result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      reply.status(500).send({ error: msg });
+    }
+  }
+);
+
+fastify.get<{ Params: { slug: string } }>('/api/profiles/:slug', async (req, reply) => {
+  try {
+    const profile = await getProfile(req.params.slug);
+    reply.send(profile);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('not found') || msg.includes('Invalid')) {
+      return reply.status(404).send({ error: msg });
+    }
+    reply.status(500).send({ error: msg });
+  }
+});
+
+fastify.put<{
+  Params: { slug: string };
+  Body: { name?: string; roleType?: string; tex?: string; description?: string };
+}>('/api/profiles/:slug', async (req, reply) => {
+  const { slug } = req.params;
+  const { name, roleType, tex, description } = req.body ?? {};
+  if (tex === undefined) {
+    return reply.status(400).send({ error: 'Missing tex' });
+  }
+  try {
+    const item = await saveProfile(slug, {
+      name: name?.trim() ?? slug,
+      roleType: roleType?.trim() ?? '',
+      tex,
+      description: description?.trim() ?? '',
+    });
+    reply.send(item);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Invalid')) {
+      return reply.status(400).send({ error: msg });
+    }
+    reply.status(500).send({ error: msg });
+  }
+});
+
+fastify.delete<{ Params: { slug: string } }>('/api/profiles/:slug', async (req, reply) => {
+  try {
+    await deleteProfile(req.params.slug);
+    reply.send({ ok: true });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Invalid')) {
+      return reply.status(400).send({ error: msg });
+    }
     reply.status(500).send({ error: msg });
   }
 });

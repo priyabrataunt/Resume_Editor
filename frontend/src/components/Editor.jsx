@@ -131,6 +131,7 @@ export default function Editor({ value, onChange, suggestions, onBadgeClick }) {
     editorRef.current = editor;
     monacoRef.current = monacoInstance;
     registerLatex(monacoInstance);
+    monacoInstance.editor.setTheme('latex-dark');
     editor.updateOptions({ language: 'latex' });
     updateWidgets();
   }
@@ -169,7 +170,7 @@ export default function Editor({ value, onChange, suggestions, onBadgeClick }) {
         defaultLanguage="plaintext"
         value={value}
         onChange={onChange}
-        theme="vs-dark"
+        theme="latex-dark"
         onMount={handleMount}
         options={{
           fontSize: 14,
