@@ -28,7 +28,7 @@ export default function PDFPreview({ pdfUrl, isCompiling, error, fileName }) {
       }}>
         <span>PDF Preview</span>
         {isCompiling && <span style={{ color: '#fbbf24' }}>⟳ Compiling…</span>}
-        {error && <span style={{ color: '#f87171', fontSize: 11 }} title={error}>⚠ Compile error</span>}
+        {error && <span style={{ color: '#f87171', fontSize: 11 }}>⚠ Compile error</span>}
         {pdfUrl && (
           <button
             onClick={handleDownload}
@@ -49,7 +49,41 @@ export default function PDFPreview({ pdfUrl, isCompiling, error, fileName }) {
         )}
       </div>
 
-      {pdfUrl ? (
+      {error ? (
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: 14,
+          gap: 8,
+          overflow: 'auto',
+          background: '#1a1018',
+        }}>
+          <div style={{ fontSize: 13, color: '#f87171', fontWeight: 600 }}>
+            ⚠ LaTeX compile failed
+          </div>
+          <div style={{ fontSize: 11, color: '#9ca8c9' }}>
+            Fix the issue in the editor and re-compile. Most common cause:
+            an applied AI suggestion introduced unbalanced braces, a missing
+            <code style={{ color: '#fbbf24' }}> \begin{'{'}…{'}'}</code> /
+            <code style={{ color: '#fbbf24' }}> \end{'{'}…{'}'}</code>, or a
+            mangled command like <code style={{ color: '#fbbf24' }}>\textbf</code>.
+          </div>
+          <pre style={{
+            margin: 0,
+            padding: 10,
+            background: '#0f0a14',
+            border: '1px solid #3a1a2a',
+            borderRadius: 6,
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: '#fca5a5',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          }}>{error}</pre>
+        </div>
+      ) : pdfUrl ? (
         <iframe
           src={pdfUrl}
           style={{ flex: 1, border: 'none', width: '100%' }}

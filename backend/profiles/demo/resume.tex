@@ -1,0 +1,208 @@
+
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+
+%----------FONT OPTIONS----------
+% sans-serif
+% \usepackage[sfdefault]{FiraSans}
+% \usepackage[sfdefault]{roboto}
+% \usepackage[sfdefault]{noto-sans}
+% \usepackage[default]{sourcesanspro}
+
+% serif
+% \usepackage{CormorantGaramond}
+% \usepackage{charter}
+
+
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.75in}
+\addtolength{\textheight}{1.25in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-6pt}\scshape\raggedright\large 
+}{}{0em}{}[\color{black}\titlerule \vspace{-6pt}]
+% Ensure that generate pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge \scshape Priyabrata Behera} \\ \vspace{1pt}
+    \small +1 630-534-0344 $|$ \href{mailto:priyabratabehera@my.unt.edu}{\underline{priyabratabehera@my.unt.edu}} $|$ 
+    \href{https://www.linkedin.com/in/beherapriyabrata/}{\underline{linkedin.com/beherapriyabrata/}} $|$
+    \href{https://github.com/priyabrataunt}{\underline{github.com/priyabrataunt}}
+\end{center}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-----------EDUCATION-----------
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {University of North Texas}{Denton, TX}
+      {Master of Science in Computer Science}{Aug. 2024 -- May 2026}
+      \resumeItemListStart
+        \resumeItem{\textbf{GPA:} 3.8/4.0}
+        \resumeItem{\textbf{Relevant Coursework:} Analysis of Computer Algorithms, Machine Learning, Deep Learning, Database Systems, Software Development for AI, Distributed Systems, Natural Language Processing}
+      \resumeItemListEnd
+    \resumeSubheading
+  {Guru Nanak Institute of Technical Campus}{Hyderabad, India}
+  {Bachelor of Technology in Computer Science}{July 2019 -- July 2023}
+  \resumeItemListStart
+    \resumeItem{\textbf{Relevant Coursework:} Data Structures and Algorithms, Object Oriented Programming, Operating Systems, Computer Networks, Database Management Systems, Software Engineering}
+  \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%---------- SKILLS-----------
+\section{Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{Languages}{: Python, JavaScript, TypeScript, SQL} \\
+     \textbf{Frontend}{: React, Next.js, Tailwind CSS} \\
+     \textbf{Backend}{: Node.js, Express.js} \\
+     \textbf{Databases}{: PostgreSQL, MongoDB} \\
+     \textbf{AI/ML Libraries}{: PyTorch, TensorFlow, pandas, NumPy, Matplotlib, scikit-learn} \\
+     \textbf{Developer Tools}{: Git, Postman, Terminal, VS Code}
+    }}
+ \end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%-----------PROJECTS-----------
+\section{Projects}
+    \resumeSubHeadingListStart
+      \resumeProjectHeading
+          {\textbf{AgileProcess Planner} $|$ \emph{TypeScript, Node.js, Azure AD, Microsoft Graph API, MCP}}{Feb 2026}
+          \resumeItemListStart
+            \resumeItem{Accelerated enterprise sprint planning by engineering a modular command routing engine with a handler registry supporting backlog generation, feature decomposition, and sprint scoping, enabling scalable AI agent dispatch with backlog-ready output across the full Agile planning lifecycle}
+            \resumeItem{Eliminated multi-step Azure admin workflows by automating end-to-end user provisioning — including account creation, security group assignment, and DevOps team onboarding — via Microsoft Graph API under a strict MCP-only architecture, reducing what previously required 3 manual steps to a single operation}
+            \resumeItem{Strengthened production security posture by migrating authentication from Personal Access Tokens to Azure Service Principal credentials and enforcing MCP-only API access, removing direct credential exposure across all external service integrations}
+            \resumeItem{\textbf{Source Code:} \href{https://github.com/workasaservice/agileprocess-planner}{\underline{GitHub Repo}}}
+\resumeItemListEnd
+      \resumeProjectHeading
+            {\textbf{Job Tracker — Automated Job Aggregator} $|$ \emph{Node.js, TypeScript, React, SQLite, OpenAI API}}{March 2026}
+          \resumeItemListStart
+            \resumeItem{Eliminated manual job searching across 7 major ATS platforms (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, JSearch) by building an automated scraper that runs every 6 hours, aggregating 200+ companies into a single self-hosted dashboard.}
+            \resumeItem{Reduced irrelevant job noise by 80\%+ by engineering a 3-condition filtering pipeline targeting entry-level/internship/co-op roles using seniority keyword exclusion and US/remote location matching, ensuring only relevant postings surface.}
+            \resumeItem{Accelerated resume-to-job fit evaluation by implementing a fully local ATS resume scorer with TF-IDF–based relevance ranking across 4 weighted dimensions (skills, relevance, visa signal, impact), eliminating dependency on external APIs.}
+            \resumeItem{Reduced job application time by building a Chrome MV3 extension that auto-fills application forms and generates tailored AI cover letters via OpenAI, streamlining the end-to-end apply workflow for each tracked role.}
+            \resumeItem{\textbf{Source Code:} \href{https://github.com/priyabrataunt/job_automation}{\underline{GitHub Repo}}}
+          \resumeItemListEnd
+    \resumeSubHeadingListEnd
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+%-----------EXPERIENCE-----------
+%------- EXPERIENCE -------%
+\section{Experience}
+  \resumeSubHeadingListStart
+
+    \resumeSubheading
+      {Software Developer}{June 2023 -- July 2024}
+      {RealPage}{Hyderabad, India}
+      \resumeItemListStart
+        \resumeItem{Accelerated feature delivery for the RealPage Admin Portal by building and maintaining modules in \textbf{C\#, ASP.NET, and Razor Pages} within Agile sprint cycles, contributing to on-time releases across 3+ sprint cycles.}
+        \resumeItem{Expanded portal capabilities by integrating \textbf{RESTful API} services, improving cross-system data flow and reducing manual data handling for internal teams.}
+        \resumeItem{Cut manual release overhead by \textbf{~30\%} by designing and implementing automated deployment workflows using \textbf{GitHub Actions}, enabling faster and more reliable.}
+      \resumeItemListEnd
+
+    \resumeSubheading
+      {Developer Intern}{Jan 2020 -- Aug 2020}
+      {WorkAsAService}{Remote}
+      \resumeItemListStart
+        \resumeItem{Reduced deployment friction for DevOps teams by automating repetitive infrastructure tasks and streamlining CI/CD pipelines, cutting average deployment time by an estimated \textbf{20\%}.}
+        \resumeItem{Improved version control consistency across \textbf{Linux} environments by configuring servers and enforcing \textbf{Git-based} workflows, reducing merge conflicts and environment drift.}
+      \resumeItemListEnd
+
+  \resumeSubHeadingListEnd
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% %-----------LEADERSHIP & ACTIVITIES-----------
+% \section{Leadership \& Activities}
+%   \resumeSubHeadingListStart
+%     \resumeSubheading
+%       {Vice President}{Aug. 2024 -- Present}
+%       {SKY Campus Happiness Club, University of North Texas}{Denton, TX}
+%       \resumeItemListStart
+%         \resumeItem{Grew club membership to 35+ active participants through targeted outreach and collaboration with UNT administration}
+%         \resumeItem{Organized and facilitated weekly sessions, managing end-to-end event planning and member engagement}
+%         \resumeItem{Coordinated with university departments to raise awareness and expand the club's campus presence}
+%       \resumeItemListEnd
+%   \resumeSubHeadingListEnd
+
+
+%
+
+\end{document}

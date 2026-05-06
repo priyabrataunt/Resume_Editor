@@ -24,6 +24,14 @@ const PROTECTED_PATTERNS = [
   /^\\newcommand/,
   /^\\renewcommand/,
   /^\\def\\/,
+  /\\resumeSubHeadingListStart/,
+  /\\resumeSubHeadingListEnd/,
+  /\\resumeItemListStart/,
+  /\\resumeItemListEnd/,
+  /\\begin\{itemize\}/,
+  /\\end\{itemize\}/,
+  /\\resumeSubheading\b/,
+  /\\resumeProjectHeading\b/,
 ];
 
 export function isProtectedLine(line: string): boolean {
@@ -54,6 +62,21 @@ export function commandsPreserved(oldStr: string, newStr: string): boolean {
   return true;
 }
 
+const STRUCTURAL_MACROS = [
+  /\\resumeSubHeadingListStart/,
+  /\\resumeSubHeadingListEnd/,
+  /\\resumeItemListStart/,
+  /\\resumeItemListEnd/,
+  /\\begin\{itemize\}/,
+  /\\end\{itemize\}/,
+  /\\resumeSubheading\b/,
+  /\\resumeProjectHeading\b/,
+];
+
+function containsStructuralMacro(text: string): boolean {
+  return STRUCTURAL_MACROS.some(p => p.test(text));
+}
+
 /** Returns a rejection reason string, or null if the suggestion passes structural checks. */
 export function suggestionRejection(s: Suggestion, resumeLines: string[]): string | null {
   if (s.line > 0 && s.line <= resumeLines.length && isProtectedLine(resumeLines[s.line - 1])) {
@@ -68,6 +91,8 @@ export function suggestionRejection(s: Suggestion, resumeLines: string[]): strin
   if (s.type !== 'add' && s.type !== 'remove' && !commandsPreserved(s.old, s.new)) {
     return 'command set drifted between old and new';
   }
+  if (containsStructuralMacro(s.old)) return 'old text contains a structural macro';
+  if (s.type !== 'remove' && containsStructuralMacro(s.new)) return 'new text contains a structural macro';
   return null;
 }
 

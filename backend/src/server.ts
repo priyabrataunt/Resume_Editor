@@ -75,6 +75,10 @@ fastify.post<{ Body: { tex: string } }>('/api/compile', async (req, reply) => {
       .send(pdfBuffer);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Log the full pdflatex error to the server terminal so it's visible
+    // even when the browser only surfaces "500 Internal Server Error".
+    req.log.error({ err: msg }, '[compile] pdflatex failed');
+    console.error('[compile] pdflatex failed:\n' + msg);
     reply.status(500).send({ error: msg });
   }
 });
@@ -123,13 +127,36 @@ fastify.get<{ Params: { slug: string } }>('/api/profiles/:slug', async (req, rep
 
 fastify.put<{
   Params: { slug: string };
-  Body: { name?: string; roleType?: string; tex?: string; description?: string };
+  Body: {
+    name?: string;
+    roleType?: string;
+    tex?: string;
+    description?: string;
+    skipValidate?: boolean;
+  };
 }>('/api/profiles/:slug', async (req, reply) => {
   const { slug } = req.params;
-  const { name, roleType, tex, description } = req.body ?? {};
+  const { name, roleType, tex, description, skipValidate } = req.body ?? {};
   if (tex === undefined) {
     return reply.status(400).send({ error: 'Missing tex' });
   }
+
+  // Compile-on-save guard: reject saves whose LaTeX won't compile, so a
+  // broken AI suggestion (or manual typo) can never replace a valid profile
+  // on disk. Empty tex is allowed (e.g. brand-new profile placeholders).
+  // Pass `skipValidate: true` in the request body to bypass for WIP saves.
+  if (!skipValidate && tex.trim().length > 0) {
+    try {
+      await compileLatex(tex);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.status(422).send({
+        error: 'Profile not saved: LaTeX failed to compile.',
+        latexError: msg,
+      });
+    }
+  }
+
   try {
     const item = await saveProfile(slug, {
       name: name?.trim() ?? slug,

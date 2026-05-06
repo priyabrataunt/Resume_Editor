@@ -211,7 +211,10 @@ export default function App() {
         }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error ?? 'Save failed');
+      if (!r.ok) {
+        const detail = d.latexError ? `\n\n${d.latexError}` : '';
+        throw new Error(`${d.error ?? 'Save failed'}${detail}`);
+      }
       await refreshProfileList();
       await loadProfileBySlug(d.slug ?? slug);
       setProfileNotice('Profile saved.');
@@ -245,7 +248,10 @@ export default function App() {
         }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error ?? 'Create failed');
+      if (!r.ok) {
+        const detail = d.latexError ? `\n\n${d.latexError}` : '';
+        throw new Error(`${d.error ?? 'Create failed'}${detail}`);
+      }
       await refreshProfileList();
       await loadProfileBySlug(d.slug ?? slug);
       setProfileNotice('New profile created from the current editor.');
@@ -376,10 +382,17 @@ export default function App() {
     setPopupState({ ...popupState, currentIndex: next });
   }
 
+  function isItemizeBalanced(tex) {
+    const opens = (tex.match(/\\begin\{itemize\}|\\resumeSubHeadingListStart|\\resumeItemListStart/g) || []).length;
+    const closes = (tex.match(/\\end\{itemize\}|\\resumeSubHeadingListEnd|\\resumeItemListEnd/g) || []).length;
+    return opens === closes;
+  }
+
   // ── Keep New: apply suggestion to editor ─────────────────────────────────────
   function handleKeepNew(suggestionIdx) {
     const s = suggestions[suggestionIdx];
     if (!s) return;
+    const prevText = resumeText;
 
     // Handle 'remove' type — delete the line entirely
     if (s.type === 'remove' && !s.new) {
@@ -388,52 +401,67 @@ export default function App() {
       if (lineIdx >= 0 && lineIdx < lines.length) {
         pushUndo({ old: s.old, new: '', line: s.line });
         lines.splice(lineIdx, 1);
-        setResumeText(lines.join('\n'));
+        const next = lines.join('\n');
+        if (!isItemizeBalanced(next)) {
+          setCompileError('Suggestion rejected: applying it would break LaTeX structure (unbalanced itemize/list macros). Suggestion skipped.');
+          return;
+        }
+        setResumeText(next);
       }
     } else {
       const lines = resumeText.split('\n');
       const lineIdx = s.line - 1;
       const lineInRange = lineIdx >= 0 && lineIdx < lines.length;
       const lineText = lineInRange ? lines[lineIdx] : '';
+      let nextText = null;
 
       // Prefer scoped edit on the reconciled line when `old` matches that line (avoids wrong first global match)
       if (s.old && lineInRange) {
         if (lineText === s.old) {
           lines[lineIdx] = s.new;
           pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-          setResumeText(lines.join('\n'));
+          nextText = lines.join('\n');
         } else if (lineText.includes(s.old)) {
           const nextLine = lineText.replace(s.old, () => s.new);
           if (nextLine !== lineText) {
             lines[lineIdx] = nextLine;
             pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-            setResumeText(lines.join('\n'));
+            nextText = lines.join('\n');
           }
         } else {
           const updated = resumeText.replace(s.old, () => s.new);
           if (updated !== resumeText) {
             pushUndo({ old: s.old, new: s.new, line: s.line });
-            setResumeText(updated);
+            nextText = updated;
           } else if (lineInRange) {
             lines[lineIdx] = s.new;
             pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-            setResumeText(lines.join('\n'));
+            nextText = lines.join('\n');
           }
         }
       } else if (!s.old && lineInRange) {
         lines[lineIdx] = s.new;
         pushUndo({ line: s.line, lineUndoBefore: lineText, old: '', new: s.new });
-        setResumeText(lines.join('\n'));
+        nextText = lines.join('\n');
       } else if (s.old) {
         const updated = resumeText.replace(s.old, () => s.new);
         if (updated !== resumeText) {
           pushUndo({ old: s.old, new: s.new, line: s.line });
-          setResumeText(updated);
+          nextText = updated;
         } else if (lineInRange) {
           lines[lineIdx] = s.new;
           pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-          setResumeText(lines.join('\n'));
+          nextText = lines.join('\n');
         }
+      }
+
+      if (nextText !== null) {
+        if (!isItemizeBalanced(nextText)) {
+          setResumeText(prevText);
+          setCompileError('Suggestion rejected: applying it would break LaTeX structure (unbalanced itemize/list macros). Suggestion skipped.');
+          return;
+        }
+        setResumeText(nextText);
       }
     }
 
