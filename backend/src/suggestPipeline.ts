@@ -13,6 +13,60 @@ export interface Suggestion {
 
 export const MAX_SUGGESTIONS_RETURNED = 10;
 
+// ── LaTeX special-character sanitiser ────────────────────────────────────────
+// The most common failure path is: AI returns content like "C#", "R&D", "Node_js",
+// or "+30%" verbatim. pdflatex then chokes with errors like:
+//   ! You can't use `macro parameter character #' in horizontal mode.
+//   ! Missing $ inserted. (for unescaped _)
+// We escape the four characters that almost always appear unescaped in
+// AI-generated resume content: # & _ %.
+//
+// Notes:
+// - $, ~, ^ are intentionally NOT touched. Resume macros and math blocks
+//   use them legitimately and double-escaping breaks valid LaTeX.
+// - We respect existing escapes via a "previous char is not a backslash"
+//   guard. (?<!\\) lookbehind matches characters whose immediate predecessor
+//   is not a single backslash. The `\\#` edge case is rare in resumes.
+// - `%` at the start of a line is a comment delimiter and is preserved.
+
+function escapeChar(text: string, char: string, escaped: string, allowLineStart = false): string {
+  const re = new RegExp(`(?<!\\\\)${char.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}`, 'g');
+  if (!allowLineStart) {
+    return text.replace(re, escaped);
+  }
+  return text.replace(re, (match, offset, full) => {
+    const lineStart = full.lastIndexOf('\n', offset - 1) + 1;
+    const beforeOnLine = full.slice(lineStart, offset);
+    if (beforeOnLine.trim() === '') return match;
+    return escaped;
+  });
+}
+
+/**
+ * Escape unescaped LaTeX specials that commonly appear in AI-generated
+ * resume content. Idempotent: already-escaped sequences (\#, \&, \_, \%)
+ * are preserved.
+ */
+export function sanitizeLatexText(text: string): string {
+  if (!text) return text;
+  let out = text;
+  out = escapeChar(out, '#', '\\#');
+  out = escapeChar(out, '&', '\\&');
+  out = escapeChar(out, '_', '\\_');
+  out = escapeChar(out, '%', '\\%', /* allowLineStart */ true);
+  return out;
+}
+
+/** Apply sanitiseLatexText to the `new` field of each suggestion in-place. */
+export function sanitizeSuggestionsForLatex<T extends { new: string; type: string }>(
+  suggestions: T[]
+): T[] {
+  return suggestions.map(s => ({
+    ...s,
+    new: s.type === 'remove' ? s.new : sanitizeLatexText(s.new),
+  }));
+}
+
 const PROTECTED_PATTERNS = [
   /^\\section\*?\{/,
   /^\\subsection\*?\{/,

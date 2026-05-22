@@ -8,6 +8,8 @@ import {
   partitionSuggestions,
   reconcileLineNumbers,
   rankAndCap,
+  sanitizeLatexText,
+  sanitizeSuggestionsForLatex,
   MAX_SUGGESTIONS_RETURNED,
   type Suggestion,
 } from './suggestPipeline';
@@ -122,6 +124,54 @@ describe('reconcileLineNumbers', () => {
     const out = reconcileLineNumbers([s({ type: 'add', old: '', new: '\\item{z}', line: 2 })], lines);
     expect(out).toHaveLength(1);
     expect(out[0]?.line).toBe(2);
+  });
+});
+
+describe('sanitizeLatexText', () => {
+  it('escapes the unescaped # character (C# bug)', () => {
+    expect(sanitizeLatexText('Python, JavaScript, TypeScript, SQL, C#'))
+      .toBe('Python, JavaScript, TypeScript, SQL, C\\#');
+  });
+
+  it('escapes & (R&D, AT&T)', () => {
+    expect(sanitizeLatexText('R&D engineer at AT&T')).toBe('R\\&D engineer at AT\\&T');
+  });
+
+  it('escapes _ outside math', () => {
+    expect(sanitizeLatexText('used Node_js and PostgreSQL_15')).toBe('used Node\\_js and PostgreSQL\\_15');
+  });
+
+  it('escapes inline % (percentages)', () => {
+    expect(sanitizeLatexText('Reduced latency by 30%'))
+      .toBe('Reduced latency by 30\\%');
+  });
+
+  it('preserves % at the start of a line (LaTeX comment)', () => {
+    expect(sanitizeLatexText('foo\n% comment\nbar 5%')).toBe('foo\n% comment\nbar 5\\%');
+  });
+
+  it('is idempotent on already-escaped strings', () => {
+    expect(sanitizeLatexText('C\\#, R\\&D, 30\\%')).toBe('C\\#, R\\&D, 30\\%');
+  });
+
+  it('handles empty and undefined-ish inputs', () => {
+    expect(sanitizeLatexText('')).toBe('');
+  });
+
+  it('does not touch math-mode tokens like $ ~ ^', () => {
+    expect(sanitizeLatexText('Cost $5 ~10ms uptime^2')).toBe('Cost $5 ~10ms uptime^2');
+  });
+});
+
+describe('sanitizeSuggestionsForLatex', () => {
+  it('sanitises the new field of each suggestion (skips remove)', () => {
+    const input = [
+      { type: 'keyword', new: 'used C# and 30%', old: 'used C-Sharp and 0.3' },
+      { type: 'remove', new: '', old: 'old text' },
+    ];
+    const out = sanitizeSuggestionsForLatex(input);
+    expect(out[0].new).toBe('used C\\# and 30\\%');
+    expect(out[1].new).toBe('');
   });
 });
 

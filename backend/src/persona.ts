@@ -7,6 +7,12 @@ const PERSONA_PATH = join(__dirname, '..', 'persona.md');
 // Priyabrata_persona folder sits at repo root (one level above backend/)
 const PRIYABRATA_PERSONA_DIR = join(__dirname, '..', '..', 'Priyabrata_persona');
 
+export interface PersonaStatus {
+  active: boolean;
+  source: 'persona.md' | 'Priyabrata_persona/' | 'none';
+  chars: number;
+}
+
 export async function getPersona(): Promise<string> {
   // 1. Prefer an explicitly distilled persona.md (user-customized or AI-distilled)
   try {
@@ -21,6 +27,24 @@ export async function getPersona(): Promise<string> {
   } catch {}
 
   return '';
+}
+
+export async function getPersonaStatus(): Promise<PersonaStatus> {
+  try {
+    const md = await readFile(PERSONA_PATH, 'utf-8');
+    if (md.trim().length > 50) {
+      return { active: true, source: 'persona.md', chars: md.length };
+    }
+  } catch {}
+
+  try {
+    const persona = await buildPersonaFromFolder(PRIYABRATA_PERSONA_DIR);
+    if (persona) {
+      return { active: true, source: 'Priyabrata_persona/', chars: persona.length };
+    }
+  } catch {}
+
+  return { active: false, source: 'none', chars: 0 };
 }
 
 async function buildPersonaFromFolder(folder: string): Promise<string> {

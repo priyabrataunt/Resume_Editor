@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import OpenAI from 'openai';
 import { compileLatex } from './compile';
 import { generateSuggestions } from './suggest';
-import { getPersona, distillPersona } from './persona';
+import { getPersona, distillPersona, getPersonaStatus } from './persona';
 import {
   listProfiles,
   getProfile,
@@ -14,6 +14,7 @@ import {
   deleteProfile,
   autoDetectProfile,
 } from './profiles';
+import { getProviderStatus } from './llm/clients';
 
 // Load env from local .env first
 loadEnv();
@@ -59,6 +60,8 @@ fastify.register(cors, {
 fastify.get('/api/health', async () => ({
   ok: true,
   openai_configured: !!process.env.OPENAI_API_KEY,
+  providers: getProviderStatus(),
+  persona: await getPersonaStatus(),
 }));
 
 // ── /api/compile ──────────────────────────────────────────────────────────────
@@ -210,7 +213,13 @@ fastify.post<{ Body: { resumeTex: string; jobDescription: string } }>(
 fastify.get('/api/persona', async (_req, reply) => {
   try {
     const content = await getPersona();
-    reply.send({ content, active: content.length > 0 });
+    const status = await getPersonaStatus();
+    reply.send({
+      content,
+      active: content.length > 0,
+      source: status.source,
+      chars: status.chars,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     reply.status(500).send({ error: msg });

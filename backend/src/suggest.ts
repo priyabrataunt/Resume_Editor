@@ -1,3 +1,10 @@
+// Entry point for /api/suggest.
+//
+// As of the multi-model refactor, the heavy lifting is delegated to the
+// 3-stage pipeline in `llm/pipeline.ts` (Reasoning → Writing → LaTeX align).
+// A legacy single-call path is retained as a safety net so the endpoint
+// stays operational if any one provider goes down.
+
 import OpenAI from 'openai';
 import {
   type Suggestion,
@@ -6,7 +13,9 @@ import {
   reconcileLineNumbers,
   validateSuggestions,
   rankAndCap,
+  sanitizeSuggestionsForLatex,
 } from './suggestPipeline';
+import { runSuggestionPipeline, type PipelineDiagnostics } from './llm/pipeline';
 
 export type { Suggestion } from './suggestPipeline';
 export { MAX_SUGGESTIONS_RETURNED } from './suggestPipeline';
@@ -20,6 +29,8 @@ export interface SuggestionResult {
     skills_match: number;
     formatting_ats_safety: number;
   };
+  jdSummary?: string;
+  diagnostics?: PipelineDiagnostics;
 }
 
 let _openai: OpenAI | null = null;
@@ -33,7 +44,36 @@ function getOpenAI(): OpenAI {
   return _openai;
 }
 
+/**
+ * Primary entry point — runs the multi-model pipeline and gracefully falls
+ * back to the legacy single-call path on hard failure.
+ */
 export async function generateSuggestions(
+  resumeTex: string,
+  jobDescription: string,
+  persona: string
+): Promise<SuggestionResult> {
+  try {
+    const result = await runSuggestionPipeline(resumeTex, jobDescription, persona);
+    return {
+      suggestions: result.suggestions,
+      atsScore: result.atsScore,
+      scoreBreakdown: result.scoreBreakdown,
+      jdSummary: result.jdSummary,
+      diagnostics: result.diagnostics,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[suggest] multi-model pipeline failed (${msg}); falling back to legacy single-call`);
+    return generateSuggestionsLegacy(resumeTex, jobDescription, persona);
+  }
+}
+
+/**
+ * Legacy single-call implementation. Kept verbatim from the pre-multi-model
+ * codebase so the endpoint still works when DeepSeek/Gemini are down.
+ */
+async function generateSuggestionsLegacy(
   resumeTex: string,
   jobDescription: string,
   persona: string
@@ -79,6 +119,11 @@ Suggestion types:
 - "old" must be the EXACT original line text, character-for-character (copy from the resume above, excluding the line number prefix and [PROTECTED] marker)
 - "new" must preserve the EXACT same LaTeX commands and structure as "old" — only change the content words (add/remove types: follow same command safety for the line you touch)
 - Never introduce LaTeX commands not already present in the original line
+- LaTeX TEXT SAFETY (this is the most common compile-fail bug): escape unescaped specials in "new":
+    #  →  \\#   (e.g. "C#" must be written as "C\\#")
+    %  →  \\%   (e.g. "30%" must be written as "30\\%")
+    &  →  \\&   (e.g. "R&D" must be written as "R\\&D")
+    _  →  \\_   (e.g. "Node_js" must be written as "Node\\_js")
 - For "remove" type: set "new" to ""
 - Each suggestion must reference specific JD keywords it addresses
 - Prioritize the most impactful edits first (high priority, more jd_keywords_addressed) — the API returns at most ${MAX_SUGGESTIONS_RETURNED} suggestions after ranking
@@ -100,14 +145,14 @@ Suggestion types:
       "section": "<which resume section>",
       "line": <1-based line number>,
       "old": "<exact original text>",
-      "new": "<improved text with same LaTeX structure>",
+      "new": "<improved text with same LaTeX structure, all specials escaped>",
       "reason": "<why this change helps, referencing JD requirements>",
       "jd_keywords_addressed": ["keyword1", "keyword2"]
     }
   ]
 }`;
 
-  console.log('[suggest] Generating suggestions with GPT-4o-mini...');
+  console.log('[suggest:legacy] Generating suggestions with gpt-4o-mini...');
   const startTime = Date.now();
 
   const response = await openai.chat.completions.create({
@@ -122,15 +167,19 @@ Suggestion types:
   });
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[suggest] Response received in ${elapsed}s`);
+  console.log(`[suggest:legacy] Response received in ${elapsed}s`);
 
   const raw = response.choices[0].message.content ?? '{}';
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    console.error('[suggest] Failed to parse response JSON');
-    return { suggestions: [], atsScore: 0, scoreBreakdown: { keyword_coverage: 0, experience_alignment: 0, skills_match: 0, formatting_ats_safety: 0 } };
+    console.error('[suggest:legacy] Failed to parse response JSON');
+    return {
+      suggestions: [],
+      atsScore: 0,
+      scoreBreakdown: { keyword_coverage: 0, experience_alignment: 0, skills_match: 0, formatting_ats_safety: 0 },
+    };
   }
 
   const atsScore = typeof parsed.atsScore === 'number' ? parsed.atsScore : 0;
@@ -175,12 +224,13 @@ Suggestion types:
     })
     .filter(s => (s.old || s.type === 'add') && (s.new || s.type === 'remove'));
 
-  const reconciled = reconcileLineNumbers(suggestions, lines);
+  const sanitised = sanitizeSuggestionsForLatex(suggestions);
+  const reconciled = reconcileLineNumbers(sanitised, lines);
   const passed = validateSuggestions(reconciled, lines);
   const ranked = rankAndCap(passed, MAX_SUGGESTIONS_RETURNED);
 
   console.log(
-    `[suggest] ${ranked.length} suggestions returned (raw=${rawSuggestions.length}, validated=${passed.length}, cap=${MAX_SUGGESTIONS_RETURNED})`
+    `[suggest:legacy] ${ranked.length} suggestions returned (raw=${rawSuggestions.length}, validated=${passed.length}, cap=${MAX_SUGGESTIONS_RETURNED})`
   );
 
   return { suggestions: ranked, atsScore, scoreBreakdown };

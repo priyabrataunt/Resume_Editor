@@ -162,6 +162,16 @@ const S = {
     fontSize: 13,
     cursor: 'pointer',
   },
+  applyAllBtn: {
+    padding: '6px 14px',
+    background: '#1f2a37',
+    border: '1px solid #6366f1',
+    borderRadius: 6,
+    color: '#c7d2fe',
+    fontWeight: 600,
+    fontSize: 12,
+    cursor: 'pointer',
+  },
 };
 
 export default function SuggestionPopup({
@@ -171,6 +181,7 @@ export default function SuggestionPopup({
   onNavigate,
   onKeepNew,
   onKeepOld,
+  onApplyAll,
   onClose,
 }) {
   const popupRef = useRef(null);
@@ -267,6 +278,15 @@ export default function SuggestionPopup({
             </button>
           </div>
           <div style={S.actions}>
+            {onApplyAll && total > 1 && (
+              <button
+                style={S.applyAllBtn}
+                onClick={onApplyAll}
+                title={`Apply all ${total} suggestions in one click`}
+              >
+                Apply all {total}
+              </button>
+            )}
             <button style={S.keepOldBtn} onClick={() => onKeepOld(currentIndex)}>Keep Old</button>
             <button style={S.keepNewBtn} onClick={() => onKeepNew(currentIndex)}>Keep New</button>
           </div>

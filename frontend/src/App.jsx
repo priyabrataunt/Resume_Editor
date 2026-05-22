@@ -5,6 +5,7 @@ import PDFPreview from './components/PDFPreview.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import { useSuggestions } from './hooks/useSuggestions.js';
 import { useUndoStack } from './hooks/useUndoStack.js';
+import { sanitizeLatexText, isItemizeBalanced } from './utils/latexSafety.js';
 
 const DEFAULT_TEX = `\\documentclass[11pt]{article}
 \\usepackage{geometry}
@@ -65,6 +66,7 @@ export default function App() {
   const [compileError, setCompileError] = useState(null);
   const [lastCompileTime, setLastCompileTime] = useState(null);
   const [personaActive, setPersonaActive] = useState(false);
+  const [personaInfo, setPersonaInfo] = useState({ source: 'none', chars: 0 });
   const [popupState, setPopupState] = useState(null); // { position: {x,y}, currentIndex: number } | null
   const [acceptedCount, setAcceptedCount] = useState(0);
   const [rejectedCount, setRejectedCount] = useState(0);
@@ -160,7 +162,10 @@ export default function App() {
 
     fetch('/api/persona')
       .then(r => r.ok ? r.json() : { active: false })
-      .then(d => setPersonaActive(d.active ?? false))
+      .then(d => {
+        setPersonaActive(d.active ?? false);
+        setPersonaInfo({ source: d.source ?? 'none', chars: d.chars ?? 0 });
+      })
       .catch(() => {});
   }, []);
 
@@ -382,98 +387,145 @@ export default function App() {
     setPopupState({ ...popupState, currentIndex: next });
   }
 
-  function isItemizeBalanced(tex) {
-    const opens = (tex.match(/\\begin\{itemize\}|\\resumeSubHeadingListStart|\\resumeItemListStart/g) || []).length;
-    const closes = (tex.match(/\\end\{itemize\}|\\resumeSubHeadingListEnd|\\resumeItemListEnd/g) || []).length;
-    return opens === closes;
+  // ── Pure: apply a single suggestion to a text snapshot ──────────────────────
+  // Returns { nextText, undoEntry } on success, or { error } on failure.
+  // Does NOT touch any React state — callable both by single-apply and by
+  // "Apply all" which folds it over the entire pending list.
+  function applySuggestionToText(currentText, s) {
+    const sanitisedNew = s.type === 'remove' ? '' : sanitizeLatexText(s.new ?? '');
+    const lines = currentText.split('\n');
+    const lineIdx = s.line - 1;
+    const lineInRange = lineIdx >= 0 && lineIdx < lines.length;
+    const lineText = lineInRange ? lines[lineIdx] : '';
+
+    if (s.type === 'remove' && !sanitisedNew) {
+      if (!lineInRange) return { error: 'Target line is out of range.' };
+      const undoEntry = { old: s.old, new: '', line: s.line };
+      lines.splice(lineIdx, 1);
+      const nextText = lines.join('\n');
+      if (!isItemizeBalanced(nextText)) {
+        return { error: 'Would break LaTeX list structure (unbalanced itemize).' };
+      }
+      return { nextText, undoEntry };
+    }
+
+    let nextText = null;
+    let undoEntry = null;
+
+    if (s.old && lineInRange) {
+      if (lineText === s.old) {
+        lines[lineIdx] = sanitisedNew;
+        undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
+        nextText = lines.join('\n');
+      } else if (lineText.includes(s.old)) {
+        const nextLine = lineText.replace(s.old, () => sanitisedNew);
+        if (nextLine !== lineText) {
+          lines[lineIdx] = nextLine;
+          undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
+          nextText = lines.join('\n');
+        }
+      } else {
+        const updated = currentText.replace(s.old, () => sanitisedNew);
+        if (updated !== currentText) {
+          undoEntry = { old: s.old, new: sanitisedNew, line: s.line };
+          nextText = updated;
+        } else if (lineInRange) {
+          lines[lineIdx] = sanitisedNew;
+          undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
+          nextText = lines.join('\n');
+        }
+      }
+    } else if (!s.old && lineInRange) {
+      lines[lineIdx] = sanitisedNew;
+      undoEntry = { line: s.line, lineUndoBefore: lineText, old: '', new: sanitisedNew };
+      nextText = lines.join('\n');
+    } else if (s.old) {
+      const updated = currentText.replace(s.old, () => sanitisedNew);
+      if (updated !== currentText) {
+        undoEntry = { old: s.old, new: sanitisedNew, line: s.line };
+        nextText = updated;
+      } else if (lineInRange) {
+        lines[lineIdx] = sanitisedNew;
+        undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
+        nextText = lines.join('\n');
+      }
+    }
+
+    if (nextText === null) {
+      return { error: 'Could not locate target text in the editor.' };
+    }
+    if (!isItemizeBalanced(nextText)) {
+      return { error: 'Would break LaTeX list structure (unbalanced itemize).' };
+    }
+    return { nextText, undoEntry };
   }
 
   // ── Keep New: apply suggestion to editor ─────────────────────────────────────
   function handleKeepNew(suggestionIdx) {
     const s = suggestions[suggestionIdx];
     if (!s) return;
-    const prevText = resumeText;
 
-    // Handle 'remove' type — delete the line entirely
-    if (s.type === 'remove' && !s.new) {
-      const lines = resumeText.split('\n');
-      const lineIdx = s.line - 1;
-      if (lineIdx >= 0 && lineIdx < lines.length) {
-        pushUndo({ old: s.old, new: '', line: s.line });
-        lines.splice(lineIdx, 1);
-        const next = lines.join('\n');
-        if (!isItemizeBalanced(next)) {
-          setCompileError('Suggestion rejected: applying it would break LaTeX structure (unbalanced itemize/list macros). Suggestion skipped.');
-          return;
-        }
-        setResumeText(next);
-      }
-    } else {
-      const lines = resumeText.split('\n');
-      const lineIdx = s.line - 1;
-      const lineInRange = lineIdx >= 0 && lineIdx < lines.length;
-      const lineText = lineInRange ? lines[lineIdx] : '';
-      let nextText = null;
-
-      // Prefer scoped edit on the reconciled line when `old` matches that line (avoids wrong first global match)
-      if (s.old && lineInRange) {
-        if (lineText === s.old) {
-          lines[lineIdx] = s.new;
-          pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-          nextText = lines.join('\n');
-        } else if (lineText.includes(s.old)) {
-          const nextLine = lineText.replace(s.old, () => s.new);
-          if (nextLine !== lineText) {
-            lines[lineIdx] = nextLine;
-            pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-            nextText = lines.join('\n');
-          }
-        } else {
-          const updated = resumeText.replace(s.old, () => s.new);
-          if (updated !== resumeText) {
-            pushUndo({ old: s.old, new: s.new, line: s.line });
-            nextText = updated;
-          } else if (lineInRange) {
-            lines[lineIdx] = s.new;
-            pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-            nextText = lines.join('\n');
-          }
-        }
-      } else if (!s.old && lineInRange) {
-        lines[lineIdx] = s.new;
-        pushUndo({ line: s.line, lineUndoBefore: lineText, old: '', new: s.new });
-        nextText = lines.join('\n');
-      } else if (s.old) {
-        const updated = resumeText.replace(s.old, () => s.new);
-        if (updated !== resumeText) {
-          pushUndo({ old: s.old, new: s.new, line: s.line });
-          nextText = updated;
-        } else if (lineInRange) {
-          lines[lineIdx] = s.new;
-          pushUndo({ line: s.line, lineUndoBefore: lineText, old: s.old, new: s.new });
-          nextText = lines.join('\n');
-        }
-      }
-
-      if (nextText !== null) {
-        if (!isItemizeBalanced(nextText)) {
-          setResumeText(prevText);
-          setCompileError('Suggestion rejected: applying it would break LaTeX structure (unbalanced itemize/list macros). Suggestion skipped.');
-          return;
-        }
-        setResumeText(nextText);
-      }
+    const result = applySuggestionToText(resumeText, s);
+    if (result.error) {
+      setCompileError(`Suggestion rejected: ${result.error} Suggestion skipped.`);
+      return;
     }
+    if (result.undoEntry) pushUndo(result.undoEntry);
+    setResumeText(result.nextText);
 
     setAcceptedCount(c => c + 1);
     dismiss(suggestionIdx);
 
-    // Advance popup or close
     if (suggestions.length <= 1) {
       setPopupState(null);
     } else {
       const nextIdx = Math.min(suggestionIdx, suggestions.length - 2);
       setPopupState(prev => prev ? { ...prev, currentIndex: nextIdx } : null);
+    }
+  }
+
+  // ── Apply all pending suggestions in one click ──────────────────────────────
+  // Iterates in descending line order (so deletions don't shift later targets)
+  // and skips any item that would break the LaTeX. Reports a summary.
+  async function handleApplyAll() {
+    if (suggestions.length === 0) return;
+
+    const ordered = suggestions
+      .map((s, idx) => ({ s, idx }))
+      .sort((a, b) => (b.s.line || 0) - (a.s.line || 0));
+
+    let workingText = resumeText;
+    const applied = [];
+    const skipped = [];
+
+    for (const { s, idx } of ordered) {
+      const result = applySuggestionToText(workingText, s);
+      if (result.error) {
+        skipped.push({ idx, reason: result.error });
+        continue;
+      }
+      workingText = result.nextText;
+      if (result.undoEntry) pushUndo(result.undoEntry);
+      applied.push(idx);
+    }
+
+    if (workingText !== resumeText) {
+      setResumeText(workingText);
+    }
+    setAcceptedCount(c => c + applied.length);
+    setRejectedCount(c => c + skipped.length);
+
+    dismissAll();
+    setPopupState(null);
+
+    if (skipped.length > 0) {
+      const head = skipped.slice(0, 3).map(x => x.reason).join('; ');
+      const tail = skipped.length > 3 ? ` (+${skipped.length - 3} more)` : '';
+      setCompileError(
+        `Applied ${applied.length} suggestion${applied.length === 1 ? '' : 's'}, skipped ${skipped.length}: ${head}${tail}`
+      );
+    } else {
+      setCompileError(null);
     }
   }
 
@@ -727,6 +779,21 @@ export default function App() {
           <span style={S.pill}>{pendingCount} suggestion{pendingCount > 1 ? 's' : ''} pending</span>
         )}
 
+        {pendingCount > 0 && (
+          <button
+            type="button"
+            className="app-btn app-btn-primary"
+            style={{
+              ...S.btnPrimary,
+              background: 'linear-gradient(180deg, #16a34a 0%, #15803d 100%)',
+            }}
+            onClick={handleApplyAll}
+            title={`Apply all ${pendingCount} pending suggestion${pendingCount > 1 ? 's' : ''} in one click. Each undo step is recorded so you can roll back.`}
+          >
+            Apply all {pendingCount}
+          </button>
+        )}
+
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button
             type="button"
@@ -948,6 +1015,8 @@ export default function App() {
         atsScore={atsScore}
         scoreBreakdown={scoreBreakdown}
         personaActive={personaActive}
+        personaSource={personaInfo.source}
+        personaChars={personaInfo.chars}
         onRefreshPersona={handleRefreshPersona}
       />
 
@@ -960,6 +1029,7 @@ export default function App() {
           onNavigate={handleNavigate}
           onKeepNew={handleKeepNew}
           onKeepOld={handleKeepOld}
+          onApplyAll={handleApplyAll}
           onClose={() => setPopupState(null)}
         />
       )}

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^16.4.5",
     "fastify": "^5.0.0",
     "openai": "^4.68.0"

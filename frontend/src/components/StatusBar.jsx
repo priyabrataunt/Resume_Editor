@@ -9,6 +9,8 @@ export default function StatusBar({
   scoreBreakdown,
   baselineAts,
   personaActive,
+  personaSource,
+  personaChars,
   onRefreshPersona,
 }) {
   function formatTime(date) {
@@ -96,9 +98,15 @@ export default function StatusBar({
         onKeyDown={personaActive ? (e) => { if (e.key === 'Enter' || e.key === ' ') onRefreshPersona?.(); } : undefined}
         role={personaActive ? 'button' : undefined}
         tabIndex={personaActive ? 0 : undefined}
-        title={personaActive ? 'Click to refresh persona' : 'No persona loaded'}
+        title={
+          personaActive
+            ? `Active persona — Writing model rewrites every suggestion in your voice.\nSource: ${personaSource ?? 'unknown'}\nSize: ${personaChars ?? 0} chars\nClick to refresh.`
+            : 'No persona loaded'
+        }
       >
-        {personaActive ? 'Persona on' : 'Persona off'}
+        {personaActive
+          ? `Persona on${personaSource && personaSource !== 'none' ? ` · ${personaSource}` : ''}`
+          : 'Persona off'}
       </span>
     </div>
   );
