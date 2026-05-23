@@ -33,6 +33,7 @@ export interface PipelineDiagnostics {
 export interface PipelineResult {
   suggestions: Suggestion[];
   atsScore: number;
+  projectedScore: number;
   scoreBreakdown: {
     keyword_coverage: number;
     experience_alignment: number;
@@ -163,6 +164,7 @@ export async function runSuggestionPipeline(
   return {
     suggestions: ranked,
     atsScore: drafted.atsScore,
+    projectedScore: drafted.projectedScore,
     scoreBreakdown: drafted.scoreBreakdown,
     jdSummary: drafted.jdSummary,
     diagnostics,

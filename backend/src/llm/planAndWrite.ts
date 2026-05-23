@@ -33,8 +33,21 @@ export interface PlanAndWriteOutput {
     formatting_ats_safety: number;
   };
   jdSummary: string;
+  projectedScore: number;
   drafts: DraftItem[];
   model: string;
+}
+
+/** Heuristic when the model omits projectedScore — caps bump when experience alignment is weak. */
+export function estimateProjectedScore(
+  atsScore: number,
+  scoreBreakdown: PlanAndWriteOutput['scoreBreakdown'],
+  draftCount: number,
+  highPriorityCount: number
+): number {
+  const bump = Math.min(22, highPriorityCount * 4 + Math.max(0, draftCount - highPriorityCount) * 2);
+  const expCap = scoreBreakdown.experience_alignment < 50 ? 78 : 95;
+  return Math.min(expCap, Math.round(atsScore + bump));
 }
 
 const SYSTEM_PROMPT = `You are a resume optimizer. Read the JD, audit the resume,
@@ -92,7 +105,10 @@ ${jobDescription}
 ${numberedResume}
 
 === TASK ===
-Return at most ${maxPlanItems} best edits that improve ATS fit for this JD.
+1. Score the CURRENT resume (before any edits) — set atsScore and scoreBreakdown.
+2. Return at most ${maxPlanItems} best edits that improve ATS fit for this JD.
+3. Set projectedScore: your estimate of atsScore AFTER all listed drafts are applied
+   (be realistic — experience/seniority gaps may cap the ceiling below 90).
 
 For each draft item output:
 - type: reframe | quantify | keyword | restructure | add | remove
@@ -108,7 +124,8 @@ For each draft item output:
 === OUTPUT (JSON ONLY) ===
 {
   "jdSummary": "...",
-  "atsScore": <weighted score>,
+  "atsScore": <weighted: keyword_coverage*0.30 + experience_alignment*0.35 + skills_match*0.25 + formatting_ats_safety*0.10>,
+  "projectedScore": <0-100 estimate after applying all drafts>,
   "scoreBreakdown": {
     "keyword_coverage": <0-100>,
     "experience_alignment": <0-100>,
@@ -135,7 +152,7 @@ export async function runPlanAndWriteStage(
   resumeTex: string,
   jobDescription: string,
   persona: string,
-  maxPlanItems = 8
+  maxPlanItems = 12
 ): Promise<PlanAndWriteOutput> {
   const trimmedPersona = trimPersonaForPrompt(persona);
   const numberedResume = numberResume(resumeTex);
@@ -290,15 +307,24 @@ export async function runPlanAndWriteStage(
     .filter((d) => (d.old || d.type === 'add') && (d.new || d.type === 'remove'));
 
   const score = parsed.scoreBreakdown as Record<string, number> | undefined;
+  const scoreBreakdown = {
+    keyword_coverage: score?.keyword_coverage ?? 0,
+    experience_alignment: score?.experience_alignment ?? 0,
+    skills_match: score?.skills_match ?? 0,
+    formatting_ats_safety: score?.formatting_ats_safety ?? 0,
+  };
+  const atsScore = typeof parsed.atsScore === 'number' ? parsed.atsScore : 0;
+  const highCount = drafts.filter((d) => d.priority === 'high').length;
+  const projectedScore =
+    typeof parsed.projectedScore === 'number'
+      ? parsed.projectedScore
+      : estimateProjectedScore(atsScore, scoreBreakdown, drafts.length, highCount);
+
   return {
-    atsScore: typeof parsed.atsScore === 'number' ? parsed.atsScore : 0,
-    scoreBreakdown: {
-      keyword_coverage: score?.keyword_coverage ?? 0,
-      experience_alignment: score?.experience_alignment ?? 0,
-      skills_match: score?.skills_match ?? 0,
-      formatting_ats_safety: score?.formatting_ats_safety ?? 0,
-    },
+    atsScore,
+    scoreBreakdown,
     jdSummary: typeof parsed.jdSummary === 'string' ? parsed.jdSummary : '',
+    projectedScore,
     drafts,
     model: actualModel,
   };

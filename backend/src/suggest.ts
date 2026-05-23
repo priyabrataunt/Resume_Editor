@@ -26,6 +26,7 @@ export { MAX_SUGGESTIONS_RETURNED } from './suggestPipeline';
 export interface SuggestionResult {
   suggestions: Suggestion[];
   atsScore: number;
+  projectedScore?: number;
   scoreBreakdown: {
     keyword_coverage: number;
     experience_alignment: number;
@@ -65,6 +66,7 @@ export async function generateSuggestions(
     return {
       suggestions: result.suggestions,
       atsScore: result.atsScore,
+      projectedScore: result.projectedScore,
       scoreBreakdown: result.scoreBreakdown,
       jdSummary: result.jdSummary,
       diagnostics: result.diagnostics,

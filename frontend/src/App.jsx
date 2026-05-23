@@ -77,7 +77,9 @@ export default function App() {
   const {
     suggestions,
     atsScore,
+    projectedScore,
     scoreBreakdown,
+    jdSummary,
     status: suggestStatus,
     error: suggestError,
     fetch: fetchSuggestions,
@@ -88,6 +90,7 @@ export default function App() {
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
 
   const [baselineAts, setBaselineAts] = useState(null);
+  const [reSuggestOffer, setReSuggestOffer] = useState(false);
 
   const [profiles, setProfiles] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
@@ -377,6 +380,15 @@ export default function App() {
     }
     dismissAll();
     setPopupState(null);
+    setReSuggestOffer(false);
+    setAcceptedCount(0);
+    setRejectedCount(0);
+    await fetchSuggestions(resumeText, jdText);
+  }
+
+  async function handleSuggestAgain() {
+    if (!jdText.trim()) return;
+    setReSuggestOffer(false);
     setAcceptedCount(0);
     setRejectedCount(0);
     await fetchSuggestions(resumeText, jdText);
@@ -528,6 +540,7 @@ export default function App() {
 
     dismissAll();
     setPopupState(null);
+    setReSuggestOffer(applied.length > 0 && !!jdText.trim());
 
     if (skipped.length > 0) {
       const head = skipped.slice(0, 3).map(x => x.reason).join('; ');
@@ -745,6 +758,10 @@ export default function App() {
     /^(Profile saved\.|New profile created|Profile deleted\.|Using “)/.test(profileNotice);
 
   const suggestStageLabel = suggestStatus === 'loading' ? 'Suggesting…' : 'Suggest';
+  const experienceGap =
+    atsScore != null &&
+    scoreBreakdown?.experience_alignment != null &&
+    scoreBreakdown.experience_alignment < 50;
 
   return (
     <div style={S.root}>
@@ -983,6 +1000,24 @@ export default function App() {
         >
           {suggestStageLabel}
         </button>
+        {atsScore != null && jdText.trim() && activeProfileSlug && (
+          <button
+            type="button"
+            className="app-btn"
+            style={{
+              ...S.btn,
+              alignSelf: 'flex-start',
+              marginTop: 2,
+              minWidth: 108,
+              opacity: suggestStatus === 'loading' ? 0.55 : 1,
+            }}
+            disabled={suggestStatus === 'loading'}
+            onClick={handleSuggestAgain}
+            title="Re-score the current resume against this job description"
+          >
+            Suggest again
+          </button>
+        )}
       </div>
 
       {/* Inline error row for suggest failures */}
@@ -996,6 +1031,70 @@ export default function App() {
           flexShrink: 0,
         }}>
           ⚠ {suggestError}
+        </div>
+      )}
+
+      {experienceGap && suggestStatus === 'done' && (
+        <div style={{
+          padding: '6px 14px',
+          background: 'rgba(251, 191, 36, 0.08)',
+          color: '#fcd34d',
+          borderBottom: '1px solid rgba(251, 191, 36, 0.2)',
+          fontSize: 12,
+          flexShrink: 0,
+          lineHeight: 1.5,
+        }}>
+          Experience alignment is low ({scoreBreakdown.experience_alignment}/100) — this role may
+          expect seniority or scope your resume does not yet show. Keyword edits help, but may not
+          push fit above ~80. Consider mid-level or new-grad AI roles, or reframe projects/experience manually.
+        </div>
+      )}
+
+      {reSuggestOffer && (
+        <div style={{
+          padding: '6px 14px',
+          background: 'rgba(74, 222, 128, 0.08)',
+          color: '#86efac',
+          borderBottom: '1px solid rgba(74, 222, 128, 0.2)',
+          fontSize: 12,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+        }}>
+          <span>Suggestions applied and compiled. Re-score your updated resume against this job description?</span>
+          <button
+            type="button"
+            className="app-btn app-btn-primary"
+            style={{ ...S.btnPrimary, padding: '4px 12px', fontSize: 11 }}
+            disabled={suggestStatus === 'loading'}
+            onClick={handleSuggestAgain}
+          >
+            Suggest again
+          </button>
+          <button
+            type="button"
+            className="app-btn"
+            style={{ ...S.btn, padding: '4px 10px', fontSize: 11 }}
+            onClick={() => setReSuggestOffer(false)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {jdSummary && suggestStatus === 'done' && pendingCount > 0 && (
+        <div style={{
+          padding: '6px 14px',
+          fontSize: 11,
+          color: '#9ca8c9',
+          borderBottom: '1px solid rgba(99, 102, 241, 0.08)',
+          background: '#0e0e18',
+          flexShrink: 0,
+          lineHeight: 1.45,
+        }}>
+          <strong style={{ color: '#a8b3cc', fontWeight: 600 }}>Role summary:</strong> {jdSummary}
         </div>
       )}
 
@@ -1030,6 +1129,7 @@ export default function App() {
         rejectedCount={rejectedCount}
         baselineAts={baselineAts}
         atsScore={atsScore}
+        projectedScore={projectedScore}
         scoreBreakdown={scoreBreakdown}
         personaActive={personaActive}
         personaSource={personaInfo.source}

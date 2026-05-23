@@ -6,6 +6,8 @@ export function useSuggestions() {
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'done' | 'error'
   const [error, setError] = useState(null);
+  const [projectedScore, setProjectedScore] = useState(null);
+  const [jdSummary, setJdSummary] = useState(null);
   const [progressStage, setProgressStage] = useState(null);
 
   const fetch = useCallback(async (resumeTex, jobDescription) => {
@@ -13,6 +15,8 @@ export function useSuggestions() {
     setError(null);
     setAtsScore(null);
     setScoreBreakdown(null);
+    setProjectedScore(null);
+    setJdSummary(null);
     setProgressStage('loading');
     try {
       const res = await window.fetch('/api/suggest', {
@@ -30,7 +34,9 @@ export function useSuggestions() {
       const data = await res.json();
       setSuggestions(data.suggestions ?? []);
       setAtsScore(data.atsScore ?? null);
+      setProjectedScore(data.projectedScore ?? null);
       setScoreBreakdown(data.scoreBreakdown ?? null);
+      setJdSummary(data.jdSummary ?? null);
       setProgressStage('done');
       if ((data.suggestions ?? []).length === 0) {
         setError('No suggestions returned — try again or paste a shorter job description.');
@@ -59,7 +65,9 @@ export function useSuggestions() {
   return {
     suggestions,
     atsScore,
+    projectedScore,
     scoreBreakdown,
+    jdSummary,
     status,
     error,
     progressStage,

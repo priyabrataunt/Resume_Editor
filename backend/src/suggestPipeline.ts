@@ -11,7 +11,7 @@ export interface Suggestion {
   jd_keywords_addressed: string[];
 }
 
-export const MAX_SUGGESTIONS_RETURNED = 10;
+export const MAX_SUGGESTIONS_RETURNED = 12;
 
 // ── LaTeX special-character sanitiser ────────────────────────────────────────
 // The most common failure path is: AI returns content like "C#", "R&D", "Node_js",
