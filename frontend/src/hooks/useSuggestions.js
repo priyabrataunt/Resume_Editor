@@ -6,25 +6,23 @@ export function useSuggestions() {
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'done' | 'error'
   const [error, setError] = useState(null);
+  const [progressStage, setProgressStage] = useState(null);
 
   const fetch = useCallback(async (resumeTex, jobDescription) => {
     setStatus('loading');
     setError(null);
     setAtsScore(null);
     setScoreBreakdown(null);
+    setProgressStage('loading');
     try {
-      let res;
-      try {
-        res = await window.fetch('/api/suggest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resumeTex, jobDescription }),
-        });
-      } catch (networkErr) {
-        throw new Error(
-          'Cannot reach backend on :3002. Start it with `cd resume-editor/backend && npm run dev`'
-        );
-      }
+      const res = await window.fetch('/api/suggest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ resumeTex, jobDescription }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? `Server error ${res.status}`);
@@ -33,9 +31,19 @@ export function useSuggestions() {
       setSuggestions(data.suggestions ?? []);
       setAtsScore(data.atsScore ?? null);
       setScoreBreakdown(data.scoreBreakdown ?? null);
+      setProgressStage('done');
+      if ((data.suggestions ?? []).length === 0) {
+        setError('No suggestions returned — try again or paste a shorter job description.');
+        setStatus('error');
+        return;
+      }
       setStatus('done');
     } catch (err) {
-      setError(err.message);
+      const message = err instanceof TypeError
+        ? 'Cannot reach backend on :3002. Start it with `cd resume-editor/backend && npm run dev`'
+        : (err?.message ?? String(err));
+      setError(message);
+      setProgressStage(null);
       setStatus('error');
     }
   }, []);
@@ -48,5 +56,16 @@ export function useSuggestions() {
 
   const pendingCount = suggestions.length;
 
-  return { suggestions, atsScore, scoreBreakdown, status, error, fetch, dismiss, dismissAll, pendingCount };
+  return {
+    suggestions,
+    atsScore,
+    scoreBreakdown,
+    status,
+    error,
+    progressStage,
+    fetch,
+    dismiss,
+    dismissAll,
+    pendingCount,
+  };
 }

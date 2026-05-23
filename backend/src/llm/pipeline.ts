@@ -13,21 +13,18 @@ import {
   rankAndCap,
   reconcileLineNumbers,
   sanitizeSuggestionsForLatex,
-  validateSuggestions,
+  suggestionRejection,
   type Suggestion,
 } from '../suggestPipeline';
-import { runReasoningStage } from './reasoning';
-import { runWritingStage } from './writing';
+import { runPlanAndWriteStage, type DraftItem } from './planAndWrite';
 import { runLatexStage } from './latex';
 
 export interface PipelineDiagnostics {
-  reasoningModel: string;
-  writingModel: string;
+  planWriteModel: string;
   latexModel: string;
   personaActive: boolean;
   personaChars: number;
-  planSize: number;
-  draftSize: number;
+  draftedSize: number;
   alignedSize: number;
   validatedSize: number;
   ms: number;
@@ -46,6 +43,45 @@ export interface PipelineResult {
   diagnostics: PipelineDiagnostics;
 }
 
+type CandidateSuggestion = Suggestion & {
+  idx: number;
+  intent: string;
+};
+
+function prepareCandidates(
+  drafts: DraftItem[],
+  resumeLines: string[]
+): {
+  reconciled: CandidateSuggestion[];
+  passed: CandidateSuggestion[];
+  rejected: Array<{ s: CandidateSuggestion; reason: string }>;
+} {
+  const raw: CandidateSuggestion[] = drafts.map((d, idx) => ({
+    idx,
+    intent: d.intent,
+    type: d.type,
+    priority: d.priority,
+    section: d.section,
+    line: d.line,
+    old: d.old,
+    new: d.new,
+    reason: d.reason,
+    jd_keywords_addressed: d.jd_keywords_addressed,
+  }));
+
+  const sanitised = sanitizeSuggestionsForLatex(raw);
+  const reconciled = reconcileLineNumbers(sanitised, resumeLines) as CandidateSuggestion[];
+  const passed: CandidateSuggestion[] = [];
+  const rejected: Array<{ s: CandidateSuggestion; reason: string }> = [];
+  for (const s of reconciled) {
+    const reason = suggestionRejection(s, resumeLines);
+    if (reason) rejected.push({ s, reason });
+    else passed.push(s);
+  }
+
+  return { reconciled, passed, rejected };
+}
+
 export async function runSuggestionPipeline(
   resumeTex: string,
   jobDescription: string,
@@ -57,13 +93,46 @@ export async function runSuggestionPipeline(
   const personaChars = persona?.length ?? 0;
   console.log(`[pipeline] starting | persona=${personaChars > 0 ? `${personaChars}ch` : 'OFF'}`);
 
-  const reasoning = await runReasoningStage(resumeTex, jobDescription, persona);
-  const writing = await runWritingStage(reasoning.plan, lines, persona);
-  const latex = await runLatexStage(writing.drafts);
+  const drafted = await runPlanAndWriteStage(resumeTex, jobDescription, persona);
+  const initial = prepareCandidates(drafted.drafts, lines);
+  let latexModel = 'skipped-local' as string;
+  let finalPassed = initial.passed;
+  let alignedSize = initial.reconciled.length;
 
-  const sanitisedAligned = sanitizeSuggestionsForLatex(latex.items);
+  if (initial.rejected.length > 0) {
+    const rejectedIdxSet = new Set(initial.rejected.map((r) => r.s.idx));
+    const failingDraftEntries = drafted.drafts
+      .map((draft, idx) => ({ draft, idx }))
+      .filter((entry) => rejectedIdxSet.has(entry.idx));
+    const fixed = await runLatexStage(failingDraftEntries.map((e) => e.draft));
+    latexModel = fixed.model;
 
-  const asSuggestions: Suggestion[] = sanitisedAligned.map((a) => ({
+    const fixedByIdx = new Map<number, DraftItem>();
+    for (let i = 0; i < failingDraftEntries.length; i++) {
+      const originalIdx = failingDraftEntries[i].idx;
+      const aligned = fixed.items[i];
+      if (aligned) {
+        fixedByIdx.set(originalIdx, {
+          type: aligned.type,
+          priority: aligned.priority,
+          section: aligned.section,
+          line: aligned.line,
+          old: aligned.old,
+          new: aligned.new,
+          intent: failingDraftEntries[i].draft.intent,
+          reason: aligned.reason,
+          jd_keywords_addressed: aligned.jd_keywords_addressed,
+        });
+      }
+    }
+
+    const mergedDrafts = drafted.drafts.map((draft, idx) => fixedByIdx.get(idx) ?? draft);
+    const postLatex = prepareCandidates(mergedDrafts, lines);
+    finalPassed = postLatex.passed;
+    alignedSize = postLatex.reconciled.length;
+  }
+
+  const finalSuggestions: Suggestion[] = finalPassed.map((a) => ({
     type: a.type,
     priority: a.priority,
     section: a.section,
@@ -74,32 +143,28 @@ export async function runSuggestionPipeline(
     jd_keywords_addressed: a.jd_keywords_addressed,
   }));
 
-  const reconciled = reconcileLineNumbers(asSuggestions, lines);
-  const passed = validateSuggestions(reconciled, lines);
-  const ranked = rankAndCap(passed, MAX_SUGGESTIONS_RETURNED);
+  const ranked = rankAndCap(finalSuggestions, MAX_SUGGESTIONS_RETURNED);
 
   const diagnostics: PipelineDiagnostics = {
-    reasoningModel: reasoning.model,
-    writingModel: writing.model,
-    latexModel: latex.model,
+    planWriteModel: drafted.model,
+    latexModel,
     personaActive: personaChars > 0,
     personaChars,
-    planSize: reasoning.plan.length,
-    draftSize: writing.drafts.length,
-    alignedSize: latex.items.length,
-    validatedSize: passed.length,
+    draftedSize: drafted.drafts.length,
+    alignedSize,
+    validatedSize: ranked.length,
     ms: Date.now() - t0,
   };
 
   console.log(
-    `[pipeline] plan=${diagnostics.planSize} draft=${diagnostics.draftSize} aligned=${diagnostics.alignedSize} validated=${diagnostics.validatedSize} (${diagnostics.ms}ms)`
+    `[pipeline] drafted=${diagnostics.draftedSize} aligned=${diagnostics.alignedSize} validated=${diagnostics.validatedSize} (${diagnostics.ms}ms)`
   );
 
   return {
     suggestions: ranked,
-    atsScore: reasoning.atsScore,
-    scoreBreakdown: reasoning.scoreBreakdown,
-    jdSummary: reasoning.jdSummary,
+    atsScore: drafted.atsScore,
+    scoreBreakdown: drafted.scoreBreakdown,
+    jdSummary: drafted.jdSummary,
     diagnostics,
   };
 }

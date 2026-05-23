@@ -74,7 +74,17 @@ export default function App() {
   const fileInputRef = useRef(null);
   const pdfBlobRef = useRef(null);
 
-  const { suggestions, atsScore, scoreBreakdown, status: suggestStatus, error: suggestError, fetch: fetchSuggestions, dismiss, dismissAll, pendingCount } = useSuggestions();
+  const {
+    suggestions,
+    atsScore,
+    scoreBreakdown,
+    status: suggestStatus,
+    error: suggestError,
+    fetch: fetchSuggestions,
+    dismiss,
+    dismissAll,
+    pendingCount,
+  } = useSuggestions();
   const { push: pushUndo, pop: popUndo, canUndo } = useUndoStack();
 
   const [baselineAts, setBaselineAts] = useState(null);
@@ -323,14 +333,15 @@ export default function App() {
   }
 
   // ── Compile ─────────────────────────────────────────────────────────────────
-  async function handleCompile() {
+  async function handleCompile(sourceTex = resumeText) {
+    const texToCompile = typeof sourceTex === 'string' ? sourceTex : resumeText;
     setCompileStatus('compiling');
     setCompileError(null);
     try {
       const res = await fetch('/api/compile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tex: resumeText }),
+        body: JSON.stringify({ tex: texToCompile }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -526,6 +537,10 @@ export default function App() {
       );
     } else {
       setCompileError(null);
+    }
+
+    if (applied.length > 0) {
+      await handleCompile(workingText);
     }
   }
 
@@ -728,6 +743,8 @@ export default function App() {
   const profileNoticePositive =
     profileNotice &&
     /^(Profile saved\.|New profile created|Profile deleted\.|Using “)/.test(profileNotice);
+
+  const suggestStageLabel = suggestStatus === 'loading' ? 'Suggesting…' : 'Suggest';
 
   return (
     <div style={S.root}>
@@ -964,7 +981,7 @@ export default function App() {
                 : 'Run AI suggestions for this profile + JD'
           }
         >
-          {suggestStatus === 'loading' ? 'Analyzing…' : 'Suggest'}
+          {suggestStageLabel}
         </button>
       </div>
 

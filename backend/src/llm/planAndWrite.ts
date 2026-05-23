@@ -1,0 +1,305 @@
+import {
+  MODELS,
+  QUALITY_MODE,
+  buildOpenAIChatParams,
+  getDeepSeek,
+  getOpenAI,
+  isDeepSeekConfigured,
+  isOpenAIConfigured,
+} from './clients';
+import { isProtectedLine } from '../suggestPipeline';
+
+export type EditType = 'reframe' | 'quantify' | 'keyword' | 'restructure' | 'add' | 'remove';
+export type EditPriority = 'high' | 'medium' | 'low';
+
+export interface DraftItem {
+  type: EditType;
+  priority: EditPriority;
+  section: string;
+  line: number;
+  old: string;
+  new: string;
+  intent: string;
+  reason: string;
+  jd_keywords_addressed: string[];
+}
+
+export interface PlanAndWriteOutput {
+  atsScore: number;
+  scoreBreakdown: {
+    keyword_coverage: number;
+    experience_alignment: number;
+    skills_match: number;
+    formatting_ats_safety: number;
+  };
+  jdSummary: string;
+  drafts: DraftItem[];
+  model: string;
+}
+
+const SYSTEM_PROMPT = `You are a resume optimizer. Read the JD, audit the resume,
+emit compile-safe LaTeX edits in the user's voice. Return ONLY JSON.
+
+Rules:
+- "old" must match the source line character-for-character.
+- Preserve LaTeX commands from "old" to "new".
+- Escape specials in content: # -> \\#, % -> \\%, & -> \\&, _ -> \\_.
+- Never touch [PROTECTED] lines, section headings, or structural macros.
+- For remove: set "new" to "". For add: set "old" to "".
+- Follow the PERSONA block (in the user message) if present.`;
+
+function trimPersonaForPrompt(persona: string, maxChars = 2200): string {
+  if (!persona || persona.length <= maxChars) return persona;
+  return `${persona.slice(0, maxChars)}\n\n[Persona truncated for token budget — rules above still apply.]`;
+}
+
+function numberResume(resumeTex: string): string {
+  return resumeTex
+    .split('\n')
+    .map((line, i) => {
+      const marker = isProtectedLine(line) ? ' [PROTECTED]' : '';
+      return `${i + 1}: ${line}${marker}`;
+    })
+    .join('\n');
+}
+
+function buildUserPrompt(
+  numberedResume: string,
+  jobDescription: string,
+  persona: string,
+  maxPlanItems: number
+): string {
+  const personaBlock = persona
+    ? `=== PERSONA (this is the user's authentic voice — match it precisely) ===
+${persona}
+=== END PERSONA ===
+
+PERSONA enforcement (apply to every "new" you emit):
+- If the persona defines a bullet template (e.g. XYZ / Action+Tool+Outcome+Metric),
+  every "new" bullet MUST follow that template.
+- If the persona lists banned words (leveraged, utilized, spearheaded, synergized,
+  facilitated, etc.), NEVER use them.
+- Prefer the persona's action verbs and required metric/specificity level.
+- Keep each "new" to 1-2 lines max.
+
+`
+    : '';
+
+  return `${personaBlock}=== JOB DESCRIPTION ===
+${jobDescription}
+
+=== RESUME (LaTeX with line numbers) ===
+${numberedResume}
+
+=== TASK ===
+Return at most ${maxPlanItems} best edits that improve ATS fit for this JD.
+
+For each draft item output:
+- type: reframe | quantify | keyword | restructure | add | remove
+- priority: high | medium | low
+- section: section name
+- line: 1-based line number (for add: line above insertion point)
+- old: exact original line text (for add: "")
+- new: improved LaTeX-safe line
+- intent: short goal statement
+- reason: why this helps for this JD
+- jd_keywords_addressed: list of JD keywords addressed
+
+=== OUTPUT (JSON ONLY) ===
+{
+  "jdSummary": "...",
+  "atsScore": <weighted score>,
+  "scoreBreakdown": {
+    "keyword_coverage": <0-100>,
+    "experience_alignment": <0-100>,
+    "skills_match": <0-100>,
+    "formatting_ats_safety": <0-100>
+  },
+  "drafts": [
+    {
+      "type": "...",
+      "priority": "...",
+      "section": "...",
+      "line": <int>,
+      "old": "...",
+      "new": "...",
+      "intent": "...",
+      "reason": "...",
+      "jd_keywords_addressed": ["..."]
+    }
+  ]
+}`;
+}
+
+export async function runPlanAndWriteStage(
+  resumeTex: string,
+  jobDescription: string,
+  persona: string,
+  maxPlanItems = 8
+): Promise<PlanAndWriteOutput> {
+  const trimmedPersona = trimPersonaForPrompt(persona);
+  const numberedResume = numberResume(resumeTex);
+  const userPrompt = buildUserPrompt(numberedResume, jobDescription, trimmedPersona, maxPlanItems);
+  const messages = [
+    { role: 'system' as const, content: SYSTEM_PROMPT },
+    { role: 'user' as const, content: userPrompt },
+  ];
+
+  // Fast mode: OpenAI primary — DeepSeek-flash often truncates JSON on long resumes + persona.
+  const useDeepSeek = isDeepSeekConfigured() && QUALITY_MODE === 'pro';
+  const useOpenAI = isOpenAIConfigured();
+
+  if (!useDeepSeek && !useOpenAI) {
+    throw new Error('No LLM provider configured (need OPENAI_API_KEY or DEEPSEEK_API_KEY)');
+  }
+
+  const start = Date.now();
+  const personaHint = persona ? `persona=${persona.length}ch` : 'persona=OFF';
+
+  async function callOpenAI(preferredModel = MODELS.writing): Promise<{ raw: string; model: string }> {
+    const openai = getOpenAI();
+    const candidates = [preferredModel, 'gpt-4o-mini'].filter(
+      (m, i, arr) => arr.indexOf(m) === i
+    );
+    let lastErr: unknown;
+    for (const candidate of candidates) {
+      try {
+        const response = await openai.chat.completions.create(
+          buildOpenAIChatParams({
+            model: candidate,
+            messages,
+            temperature: 0.25,
+            maxOutputTokens: 4000,
+            responseFormat: { type: 'json_object' },
+          }) as unknown as Parameters<typeof openai.chat.completions.create>[0]
+        );
+        const raw =
+          (response as { choices: Array<{ message?: { content?: string } }> }).choices[0]?.message
+            ?.content ?? '{}';
+        return { raw, model: candidate };
+      } catch (err) {
+        lastErr = err;
+        console.warn(
+          `[plan-write] OpenAI ${candidate} failed (${err instanceof Error ? err.message : String(err)})`
+        );
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  let raw = '{}';
+  let actualModel = MODELS.writing;
+
+  if (useDeepSeek) {
+    const client = getDeepSeek();
+    actualModel = MODELS.reasoning;
+    console.log(`[plan-write] model=${actualModel} provider=deepseek ${personaHint}`);
+    const params: Record<string, unknown> = {
+      model: actualModel,
+      temperature: 0.25,
+      max_tokens: 8192,
+      response_format: { type: 'json_object' },
+      messages,
+      reasoning_effort: 'high',
+      thinking: { type: 'enabled' },
+    };
+    try {
+      const response = await client.chat.completions.create(
+        params as unknown as Parameters<typeof client.chat.completions.create>[0]
+      );
+      raw =
+        (response as { choices: Array<{ message?: { content?: string } }> }).choices[0]?.message
+          ?.content ?? '{}';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[plan-write] DeepSeek failed (${msg}); falling back to OpenAI`);
+      const fallback = await callOpenAI();
+      raw = fallback.raw;
+      actualModel = fallback.model;
+    }
+  } else {
+    console.log(`[plan-write] model=${MODELS.writing} provider=openai ${personaHint}`);
+    const result = await callOpenAI();
+    raw = result.raw;
+    actualModel = result.model;
+  }
+
+  console.log(`[plan-write] primary completed in ${((Date.now() - start) / 1000).toFixed(1)}s (model=${actualModel})`);
+
+  let parsed: Record<string, unknown> = {};
+  let parseFailed = false;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parseFailed = true;
+    console.error('[plan-write] failed to parse JSON output');
+  }
+
+  let draftsRaw = Array.isArray(parsed.drafts) ? parsed.drafts : [];
+  if ((parseFailed || draftsRaw.length === 0) && useDeepSeek && useOpenAI) {
+    console.warn(
+      `[plan-write] DeepSeek returned ${parseFailed ? 'unparseable' : 'empty'} output; retrying with OpenAI`
+    );
+    const fallback = await callOpenAI();
+    raw = fallback.raw;
+    actualModel = fallback.model;
+    try {
+      parsed = JSON.parse(raw);
+      parseFailed = false;
+      draftsRaw = Array.isArray(parsed.drafts) ? parsed.drafts : [];
+    } catch {
+      parseFailed = true;
+    }
+    console.log(`[plan-write] openai fallback completed in ${((Date.now() - start) / 1000).toFixed(1)}s total`);
+  }
+
+  if ((parseFailed || draftsRaw.length === 0) && useOpenAI) {
+    throw new Error('Plan+write returned no usable suggestions from any model');
+  }
+
+  const validTypes = new Set<EditType>([
+    'reframe',
+    'quantify',
+    'keyword',
+    'restructure',
+    'add',
+    'remove',
+  ]);
+  const validPriorities = new Set<EditPriority>(['high', 'medium', 'low']);
+  const drafts: DraftItem[] = draftsRaw
+    .map((item) => {
+      const d = item as Record<string, unknown>;
+      const type = String(d.type ?? 'keyword');
+      const priority = String(d.priority ?? 'medium');
+      return {
+        type: validTypes.has(type as EditType) ? (type as EditType) : 'keyword',
+        priority: validPriorities.has(priority as EditPriority)
+          ? (priority as EditPriority)
+          : 'medium',
+        section: String(d.section ?? 'Resume'),
+        line: typeof d.line === 'number' ? d.line : 0,
+        old: String(d.old ?? ''),
+        new: String(d.new ?? ''),
+        intent: String(d.intent ?? ''),
+        reason: String(d.reason ?? ''),
+        jd_keywords_addressed: Array.isArray(d.jd_keywords_addressed)
+          ? (d.jd_keywords_addressed as unknown[]).map(String)
+          : [],
+      };
+    })
+    .filter((d) => (d.old || d.type === 'add') && (d.new || d.type === 'remove'));
+
+  const score = parsed.scoreBreakdown as Record<string, number> | undefined;
+  return {
+    atsScore: typeof parsed.atsScore === 'number' ? parsed.atsScore : 0,
+    scoreBreakdown: {
+      keyword_coverage: score?.keyword_coverage ?? 0,
+      experience_alignment: score?.experience_alignment ?? 0,
+      skills_match: score?.skills_match ?? 0,
+      formatting_ats_safety: score?.formatting_ats_safety ?? 0,
+    },
+    jdSummary: typeof parsed.jdSummary === 'string' ? parsed.jdSummary : '',
+    drafts,
+    model: actualModel,
+  };
+}

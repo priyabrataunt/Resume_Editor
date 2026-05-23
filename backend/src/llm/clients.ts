@@ -10,17 +10,23 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai';
 
+export type QualityMode = 'fast' | 'pro';
+export const QUALITY_MODE: QualityMode =
+  process.env.RESUME_QUALITY_MODE === 'pro' ? 'pro' : 'fast';
+
 // ── Model identifiers (env-overridable) ──────────────────────────────────────
-// Defaults chosen from the official docs (read May 2026):
-//  - DeepSeek: deepseek-v4-pro is the reasoning flagship with `thinking` mode.
-//  - OpenAI: gpt-5.5 is the current frontier writing/professional model.
-//  - Gemini: gemini-3.1-pro is the advanced multimodal/code model.
-//  - OpenAI Codex fallback: gpt-5.3-codex is the best agentic coding model
-//    and is used when GEMINI_API_KEY is not configured.
+// Defaults chosen for low-latency "fast" mode. Set RESUME_QUALITY_MODE=pro to
+// switch defaults back to frontier-quality models.
 export const MODELS = {
-  reasoning: process.env.RESUME_REASONING_MODEL ?? 'deepseek-v4-pro',
-  writing: process.env.RESUME_WRITING_MODEL ?? 'gpt-5.5',
-  latex: process.env.RESUME_LATEX_MODEL ?? 'gemini-3.1-pro',
+  reasoning:
+    process.env.RESUME_REASONING_MODEL ??
+    (QUALITY_MODE === 'pro' ? 'deepseek-v4-pro' : 'deepseek-v4-flash'),
+  writing:
+    process.env.RESUME_WRITING_MODEL ??
+    (QUALITY_MODE === 'pro' ? 'gpt-5.5' : 'gpt-5.4-mini'),
+  latex:
+    process.env.RESUME_LATEX_MODEL ??
+    (QUALITY_MODE === 'pro' ? 'gemini-3.1-pro' : 'gemini-3.5-flash'),
   latexFallback: process.env.RESUME_LATEX_FALLBACK_MODEL ?? 'gpt-5.3-codex',
 };
 
@@ -36,6 +42,35 @@ export function getOpenAI(): OpenAI {
 
 export function isOpenAIConfigured(): boolean {
   return !!process.env.OPENAI_API_KEY;
+}
+
+/** GPT-5 / o-series models reject `max_tokens`; they require `max_completion_tokens`. */
+export function openAIUsesMaxCompletionTokens(model: string): boolean {
+  return /^gpt-5|^o[134](-|$)/.test(model);
+}
+
+export interface OpenAIChatParamsInput {
+  model: string;
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseFormat?: { type: 'json_object' };
+}
+
+export function buildOpenAIChatParams(input: OpenAIChatParamsInput): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    model: input.model,
+    messages: input.messages,
+  };
+  if (input.temperature != null) params.temperature = input.temperature;
+  if (input.responseFormat) params.response_format = input.responseFormat;
+  const limit = input.maxOutputTokens ?? 4000;
+  if (openAIUsesMaxCompletionTokens(input.model)) {
+    params.max_completion_tokens = limit;
+  } else {
+    params.max_tokens = limit;
+  }
+  return params;
 }
 
 // ── DeepSeek (OpenAI-compatible) ────────────────────────────────────────────
@@ -84,6 +119,7 @@ export interface ProviderStatus {
   deepseek: boolean;
   gemini: boolean;
   models: typeof MODELS;
+  quality_mode: QualityMode;
   // Effective routing after key-availability fallback.
   routing: {
     reasoning: { provider: 'deepseek' | 'openai'; model: string };
@@ -93,17 +129,20 @@ export interface ProviderStatus {
 }
 
 export function getProviderStatus(): ProviderStatus {
-  const reasoningProvider = isDeepSeekConfigured() ? 'deepseek' : 'openai';
+  // Fast mode uses OpenAI for plan+write — DeepSeek-flash truncates JSON on long resumes.
+  const planWriteProvider =
+    QUALITY_MODE === 'pro' && isDeepSeekConfigured() ? 'deepseek' : 'openai';
   const latexProvider = isGeminiConfigured() ? 'gemini' : 'openai';
   return {
     openai: isOpenAIConfigured(),
     deepseek: isDeepSeekConfigured(),
     gemini: isGeminiConfigured(),
     models: MODELS,
+    quality_mode: QUALITY_MODE,
     routing: {
       reasoning: {
-        provider: reasoningProvider,
-        model: reasoningProvider === 'deepseek' ? MODELS.reasoning : MODELS.writing,
+        provider: planWriteProvider,
+        model: planWriteProvider === 'deepseek' ? MODELS.reasoning : MODELS.writing,
       },
       writing: { provider: 'openai', model: MODELS.writing },
       latex: {

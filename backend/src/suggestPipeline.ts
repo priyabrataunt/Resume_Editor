@@ -131,6 +131,92 @@ function containsStructuralMacro(text: string): boolean {
   return STRUCTURAL_MACROS.some(p => p.test(text));
 }
 
+const ITEM_LIST_OPEN = [
+  /\\begin\{itemize\}/,
+  /\\resumeItemListStart/,
+];
+
+const ITEM_LIST_CLOSE = [
+  /\\end\{itemize\}/,
+  /\\resumeItemListEnd/,
+];
+
+const ITEM_COMMAND = /\\item\b/;
+
+function hasItemCommand(text: string): boolean {
+  return ITEM_COMMAND.test(text);
+}
+
+function hasListOpen(text: string): boolean {
+  return ITEM_LIST_OPEN.some((p) => p.test(text));
+}
+
+function hasListClose(text: string): boolean {
+  return ITEM_LIST_CLOSE.some((p) => p.test(text));
+}
+
+/**
+ * For each source line, marks whether the line is currently inside an itemized
+ * list environment (`itemize` or resumeItemList* macros).
+ */
+export function buildItemizeMap(resumeLines: string[]): boolean[] {
+  const inside: boolean[] = new Array(resumeLines.length).fill(false);
+  let depth = 0;
+
+  for (let i = 0; i < resumeLines.length; i++) {
+    const line = resumeLines[i] ?? '';
+    // If this line closes a list, it should not be treated as "inside".
+    if (hasListClose(line)) {
+      depth = Math.max(0, depth - 1);
+    }
+
+    inside[i] = depth > 0;
+
+    // A line that opens a list means subsequent lines are "inside".
+    if (hasListOpen(line)) {
+      depth += 1;
+    }
+  }
+
+  return inside;
+}
+
+function isListContext(line: number, resumeLines: string[], itemizeMap: boolean[]): boolean {
+  const idx = line - 1;
+  if (idx < 0 || idx >= resumeLines.length) return false;
+  const curr = resumeLines[idx] ?? '';
+  const prev = idx > 0 ? resumeLines[idx - 1] ?? '' : '';
+  const next = idx + 1 < resumeLines.length ? resumeLines[idx + 1] ?? '' : '';
+
+  return (
+    itemizeMap[idx] ||
+    hasListOpen(curr) ||
+    hasListOpen(prev) ||
+    (idx > 0 && itemizeMap[idx - 1]) ||
+    hasListClose(next)
+  );
+}
+
+/**
+ * Rejects suggestions that would create invalid list markup, such as:
+ * - introducing `\item` outside itemize/resumeItemList environments
+ * - removing `\item` from a line that is currently inside list context
+ */
+export function orphanItemRejection(s: Suggestion, resumeLines: string[]): string | null {
+  if (s.type === 'remove') return null;
+  const hasNewItem = hasItemCommand(s.new);
+  const hadOldItem = hasItemCommand(s.old);
+  const itemizeMap = buildItemizeMap(resumeLines);
+  const inListContext = isListContext(s.line, resumeLines, itemizeMap);
+
+  if (hasNewItem && !inListContext) return 'introduces \\item outside a list environment';
+  if (hadOldItem && !hasNewItem && inListContext && s.new.trim().length > 0) {
+    return 'removes \\item from list context';
+  }
+
+  return null;
+}
+
 /** Returns a rejection reason string, or null if the suggestion passes structural checks. */
 export function suggestionRejection(s: Suggestion, resumeLines: string[]): string | null {
   if (s.line > 0 && s.line <= resumeLines.length && isProtectedLine(resumeLines[s.line - 1])) {
@@ -142,6 +228,8 @@ export function suggestionRejection(s: Suggestion, resumeLines: string[]): strin
     if (oldHeading !== newHeading) return 'mutates a section heading';
   }
   if (s.type !== 'remove' && !isBraceBalanced(s.new)) return 'unbalanced braces in new';
+  const orphanItem = orphanItemRejection(s, resumeLines);
+  if (orphanItem) return orphanItem;
   if (s.type !== 'add' && s.type !== 'remove' && !commandsPreserved(s.old, s.new)) {
     return 'command set drifted between old and new';
   }

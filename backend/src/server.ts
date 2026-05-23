@@ -198,6 +198,7 @@ fastify.post<{ Body: { resumeTex: string; jobDescription: string } }>(
     if (!resumeTex || !jobDescription) {
       return reply.status(400).send({ error: 'Missing resumeTex or jobDescription' });
     }
+
     try {
       const persona = await getPersona();
       const result = await generateSuggestions(resumeTex, jobDescription, persona);

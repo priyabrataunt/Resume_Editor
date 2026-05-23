@@ -4,6 +4,8 @@ import {
   isBraceBalanced,
   extractCommands,
   commandsPreserved,
+  buildItemizeMap,
+  orphanItemRejection,
   suggestionRejection,
   partitionSuggestions,
   reconcileLineNumbers,
@@ -96,6 +98,73 @@ describe('suggestionRejection', () => {
     expect(
       suggestionRejection(s({ line: 2, old: '', new: '\\resumeItem{New}', type: 'add' }), lines)
     ).toBeNull();
+  });
+
+  it('rejects introducing \\item outside list context', () => {
+    const r = suggestionRejection(
+      s({ line: 2, old: '\\resumeItem{Alpha}', new: '\\item Built API endpoints', type: 'add' }),
+      lines
+    );
+    expect(r).toBe('introduces \\item outside a list environment');
+  });
+
+  it('rejects removing \\item while still in list context', () => {
+    const listLines = [
+      '\\begin{itemize}',
+      '  \\item Built API endpoints',
+      '\\end{itemize}',
+    ];
+    const r = suggestionRejection(
+      s({
+        line: 2,
+        old: '  \\item Built API endpoints',
+        new: '  Built API endpoints',
+        type: 'keyword',
+      }),
+      listLines
+    );
+    expect(r).toBe('removes \\item from list context');
+  });
+});
+
+describe('itemize environment helpers', () => {
+  it('buildItemizeMap marks lines inside itemize and resumeItemList blocks', () => {
+    const lines = [
+      '\\section{Experience}',
+      '\\begin{itemize}',
+      '\\item Built A',
+      '\\end{itemize}',
+      '\\resumeItemListStart',
+      '\\item Built B',
+      '\\resumeItemListEnd',
+    ];
+    expect(buildItemizeMap(lines)).toEqual([
+      false, // section
+      false, // begin line itself
+      true,  // item line
+      false, // end line
+      false, // start macro line itself
+      true,  // item line inside resume list
+      false, // end macro line
+    ]);
+  });
+
+  it('orphanItemRejection allows \\item when attached to list opening context', () => {
+    const lines = [
+      '\\begin{itemize}',
+      '% placeholder',
+      '\\end{itemize}',
+    ];
+    const rejection = orphanItemRejection(
+      s({
+        line: 2,
+        old: '% placeholder',
+        new: '\\item Added bullet',
+        type: 'add',
+      }),
+      lines
+    );
+    expect(rejection).toBeNull();
   });
 });
 

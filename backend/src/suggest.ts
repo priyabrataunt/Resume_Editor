@@ -15,7 +15,10 @@ import {
   rankAndCap,
   sanitizeSuggestionsForLatex,
 } from './suggestPipeline';
-import { runSuggestionPipeline, type PipelineDiagnostics } from './llm/pipeline';
+import {
+  runSuggestionPipeline,
+  type PipelineDiagnostics,
+} from './llm/pipeline';
 
 export type { Suggestion } from './suggestPipeline';
 export { MAX_SUGGESTIONS_RETURNED } from './suggestPipeline';
@@ -55,6 +58,10 @@ export async function generateSuggestions(
 ): Promise<SuggestionResult> {
   try {
     const result = await runSuggestionPipeline(resumeTex, jobDescription, persona);
+    if (result.suggestions.length === 0) {
+      console.warn('[suggest] pipeline returned 0 suggestions; falling back to legacy single-call');
+      return generateSuggestionsLegacy(resumeTex, jobDescription, persona);
+    }
     return {
       suggestions: result.suggestions,
       atsScore: result.atsScore,

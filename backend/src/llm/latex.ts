@@ -9,6 +9,7 @@
 
 import {
   MODELS,
+  buildOpenAIChatParams,
   getGeminiModel,
   getOpenAI,
   isGeminiConfigured,
@@ -18,7 +19,7 @@ import {
   isBraceBalanced,
   sanitizeLatexText,
 } from '../suggestPipeline';
-import type { DraftItem } from './writing';
+import type { DraftItem } from './planAndWrite';
 
 export interface AlignedItem extends DraftItem {
   // model that finalised this item
@@ -94,34 +95,31 @@ async function callGemini(payload: string): Promise<RawAlignedItem[]> {
 
 async function callOpenAICodex(payload: string): Promise<RawAlignedItem[]> {
   const openai = getOpenAI();
-  let response;
-  try {
-    response = await openai.chat.completions.create({
-      model: MODELS.latexFallback,
-      temperature: 0.1,
-      max_tokens: 4000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_INSTRUCTION },
-        { role: 'user', content: payload },
-      ],
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[latex] ${MODELS.latexFallback} failed (${msg}); retrying with gpt-4o-mini`);
-    response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.1,
-      max_tokens: 4000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_INSTRUCTION },
-        { role: 'user', content: payload },
-      ],
-    });
+  const messages = [
+    { role: 'system' as const, content: SYSTEM_INSTRUCTION },
+    { role: 'user' as const, content: payload },
+  ];
+  const models = [MODELS.latexFallback, 'gpt-4o-mini'];
+  for (const model of models) {
+    try {
+      const response = await openai.chat.completions.create(
+        buildOpenAIChatParams({
+          model,
+          messages,
+          temperature: 0.1,
+          maxOutputTokens: 4000,
+          responseFormat: { type: 'json_object' },
+        }) as unknown as Parameters<typeof openai.chat.completions.create>[0]
+      );
+      const raw = (response as { choices: Array<{ message?: { content?: string } }> }).choices[0]
+        ?.message?.content ?? '{}';
+      return parseRaw(raw);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[latex] ${model} failed (${msg})`);
+    }
   }
-  const raw = response.choices[0]?.message?.content ?? '{}';
-  return parseRaw(raw);
+  return [];
 }
 
 /**
