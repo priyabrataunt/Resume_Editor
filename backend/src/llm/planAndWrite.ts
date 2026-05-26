@@ -2,9 +2,8 @@ import {
   MODELS,
   QUALITY_MODE,
   buildOpenAIChatParams,
-  getDeepSeek,
   getOpenAI,
-  isDeepSeekConfigured,
+  getProReasoningEffort,
   isOpenAIConfigured,
 } from './clients';
 import { isProtectedLine } from '../suggestPipeline';
@@ -162,20 +161,19 @@ export async function runPlanAndWriteStage(
     { role: 'user' as const, content: userPrompt },
   ];
 
-  // Fast mode: OpenAI primary — DeepSeek-flash often truncates JSON on long resumes + persona.
-  const useDeepSeek = isDeepSeekConfigured() && QUALITY_MODE === 'pro';
-  const useOpenAI = isOpenAIConfigured();
-
-  if (!useDeepSeek && !useOpenAI) {
-    throw new Error('No LLM provider configured (need OPENAI_API_KEY or DEEPSEEK_API_KEY)');
+  // Plan+write always uses OpenAI (fast: gpt-5.4-mini; pro: gpt-5.5 + reasoning_effort).
+  if (!isOpenAIConfigured()) {
+    throw new Error('No LLM provider configured (need OPENAI_API_KEY)');
   }
 
   const start = Date.now();
   const personaHint = persona ? `persona=${persona.length}ch` : 'persona=OFF';
+  const maxOutputTokens = QUALITY_MODE === 'pro' ? 8192 : 4000;
+  const reasoningEffort = QUALITY_MODE === 'pro' ? getProReasoningEffort() : undefined;
 
   async function callOpenAI(preferredModel = MODELS.writing): Promise<{ raw: string; model: string }> {
     const openai = getOpenAI();
-    const candidates = [preferredModel, 'gpt-4o-mini'].filter(
+    const candidates = [preferredModel, MODELS.writingFallback, 'gpt-4o-mini'].filter(
       (m, i, arr) => arr.indexOf(m) === i
     );
     let lastErr: unknown;
@@ -186,8 +184,12 @@ export async function runPlanAndWriteStage(
             model: candidate,
             messages,
             temperature: 0.25,
-            maxOutputTokens: 4000,
+            maxOutputTokens,
             responseFormat: { type: 'json_object' },
+            reasoningEffort:
+              candidate === preferredModel || candidate === MODELS.writing
+                ? reasoningEffort
+                : undefined,
           }) as unknown as Parameters<typeof openai.chat.completions.create>[0]
         );
         const raw =
@@ -207,39 +209,13 @@ export async function runPlanAndWriteStage(
   let raw = '{}';
   let actualModel = MODELS.writing;
 
-  if (useDeepSeek) {
-    const client = getDeepSeek();
-    actualModel = MODELS.reasoning;
-    console.log(`[plan-write] model=${actualModel} provider=deepseek ${personaHint}`);
-    const params: Record<string, unknown> = {
-      model: actualModel,
-      temperature: 0.25,
-      max_tokens: 8192,
-      response_format: { type: 'json_object' },
-      messages,
-      reasoning_effort: 'high',
-      thinking: { type: 'enabled' },
-    };
-    try {
-      const response = await client.chat.completions.create(
-        params as unknown as Parameters<typeof client.chat.completions.create>[0]
-      );
-      raw =
-        (response as { choices: Array<{ message?: { content?: string } }> }).choices[0]?.message
-          ?.content ?? '{}';
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[plan-write] DeepSeek failed (${msg}); falling back to OpenAI`);
-      const fallback = await callOpenAI();
-      raw = fallback.raw;
-      actualModel = fallback.model;
-    }
-  } else {
-    console.log(`[plan-write] model=${MODELS.writing} provider=openai ${personaHint}`);
-    const result = await callOpenAI();
-    raw = result.raw;
-    actualModel = result.model;
-  }
+  const effortHint = reasoningEffort ? ` reasoning_effort=${reasoningEffort}` : '';
+  console.log(
+    `[plan-write] model=${MODELS.writing} provider=openai${effortHint} ${personaHint}`
+  );
+  const result = await callOpenAI();
+  raw = result.raw;
+  actualModel = result.model;
 
   console.log(`[plan-write] primary completed in ${((Date.now() - start) / 1000).toFixed(1)}s (model=${actualModel})`);
 
@@ -253,24 +229,7 @@ export async function runPlanAndWriteStage(
   }
 
   let draftsRaw = Array.isArray(parsed.drafts) ? parsed.drafts : [];
-  if ((parseFailed || draftsRaw.length === 0) && useDeepSeek && useOpenAI) {
-    console.warn(
-      `[plan-write] DeepSeek returned ${parseFailed ? 'unparseable' : 'empty'} output; retrying with OpenAI`
-    );
-    const fallback = await callOpenAI();
-    raw = fallback.raw;
-    actualModel = fallback.model;
-    try {
-      parsed = JSON.parse(raw);
-      parseFailed = false;
-      draftsRaw = Array.isArray(parsed.drafts) ? parsed.drafts : [];
-    } catch {
-      parseFailed = true;
-    }
-    console.log(`[plan-write] openai fallback completed in ${((Date.now() - start) / 1000).toFixed(1)}s total`);
-  }
-
-  if ((parseFailed || draftsRaw.length === 0) && useOpenAI) {
+  if (parseFailed || draftsRaw.length === 0) {
     throw new Error('Plan+write returned no usable suggestions from any model');
   }
 

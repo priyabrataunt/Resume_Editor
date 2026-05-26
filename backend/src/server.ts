@@ -1,3 +1,4 @@
+import './loadEnv';
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
@@ -15,9 +16,6 @@ import {
   autoDetectProfile,
 } from './profiles';
 import { getProviderStatus } from './llm/clients';
-
-// Load env from local .env first
-loadEnv();
 
 // Fallback: pick up OPENAI_API_KEY from job_automation/.env so users don't
 // have to duplicate the key. ../../job_automation/backend/.env relative to src/.

@@ -11,19 +11,27 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai';
 
 export type QualityMode = 'fast' | 'pro';
+export type ReasoningEffort = 'medium' | 'high';
+
 export const QUALITY_MODE: QualityMode =
   process.env.RESUME_QUALITY_MODE === 'pro' ? 'pro' : 'fast';
 
+export function getProReasoningEffort(): ReasoningEffort {
+  return process.env.RESUME_PRO_REASONING_EFFORT === 'high' ? 'high' : 'medium';
+}
+
 // ── Model identifiers (env-overridable) ──────────────────────────────────────
-// Defaults chosen for low-latency "fast" mode. Set RESUME_QUALITY_MODE=pro to
-// switch defaults back to frontier-quality models.
+// Fast: gpt-5.4-mini for low-latency plan+write. Pro: gpt-5.5 + reasoning_effort.
 export const MODELS = {
   reasoning:
     process.env.RESUME_REASONING_MODEL ??
-    (QUALITY_MODE === 'pro' ? 'deepseek-v4-pro' : 'deepseek-v4-flash'),
+    (QUALITY_MODE === 'pro' ? 'gpt-5.5' : 'deepseek-v4-flash'),
   writing:
     process.env.RESUME_WRITING_MODEL ??
     (QUALITY_MODE === 'pro' ? 'gpt-5.5' : 'gpt-5.4-mini'),
+  writingFallback:
+    process.env.RESUME_WRITING_FALLBACK_MODEL ??
+    (QUALITY_MODE === 'pro' ? 'gpt-5.4' : 'gpt-4o-mini'),
   latex:
     process.env.RESUME_LATEX_MODEL ??
     (QUALITY_MODE === 'pro' ? 'gemini-3.1-pro' : 'gemini-3.5-flash'),
@@ -49,12 +57,18 @@ export function openAIUsesMaxCompletionTokens(model: string): boolean {
   return /^gpt-5|^o[134](-|$)/.test(model);
 }
 
+/** GPT-5 models only accept the default temperature (1); omit custom values. */
+export function openAISupportsCustomTemperature(model: string): boolean {
+  return !/^gpt-5/.test(model);
+}
+
 export interface OpenAIChatParamsInput {
   model: string;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   temperature?: number;
   maxOutputTokens?: number;
   responseFormat?: { type: 'json_object' };
+  reasoningEffort?: ReasoningEffort;
 }
 
 export function buildOpenAIChatParams(input: OpenAIChatParamsInput): Record<string, unknown> {
@@ -62,8 +76,11 @@ export function buildOpenAIChatParams(input: OpenAIChatParamsInput): Record<stri
     model: input.model,
     messages: input.messages,
   };
-  if (input.temperature != null) params.temperature = input.temperature;
+  if (input.temperature != null && openAISupportsCustomTemperature(input.model)) {
+    params.temperature = input.temperature;
+  }
   if (input.responseFormat) params.response_format = input.responseFormat;
+  if (input.reasoningEffort) params.reasoning_effort = input.reasoningEffort;
   const limit = input.maxOutputTokens ?? 4000;
   if (openAIUsesMaxCompletionTokens(input.model)) {
     params.max_completion_tokens = limit;
@@ -122,17 +139,21 @@ export interface ProviderStatus {
   quality_mode: QualityMode;
   // Effective routing after key-availability fallback.
   routing: {
-    reasoning: { provider: 'deepseek' | 'openai'; model: string };
+    planWrite: { provider: 'openai'; model: string; reasoning_effort?: ReasoningEffort };
     writing: { provider: 'openai'; model: string };
     latex: { provider: 'gemini' | 'openai'; model: string };
   };
 }
 
 export function getProviderStatus(): ProviderStatus {
-  // Fast mode uses OpenAI for plan+write — DeepSeek-flash truncates JSON on long resumes.
-  const planWriteProvider =
-    QUALITY_MODE === 'pro' && isDeepSeekConfigured() ? 'deepseek' : 'openai';
   const latexProvider = isGeminiConfigured() ? 'gemini' : 'openai';
+  const planWrite: ProviderStatus['routing']['planWrite'] = {
+    provider: 'openai',
+    model: MODELS.writing,
+  };
+  if (QUALITY_MODE === 'pro') {
+    planWrite.reasoning_effort = getProReasoningEffort();
+  }
   return {
     openai: isOpenAIConfigured(),
     deepseek: isDeepSeekConfigured(),
@@ -140,10 +161,7 @@ export function getProviderStatus(): ProviderStatus {
     models: MODELS,
     quality_mode: QUALITY_MODE,
     routing: {
-      reasoning: {
-        provider: planWriteProvider,
-        model: planWriteProvider === 'deepseek' ? MODELS.reasoning : MODELS.writing,
-      },
+      planWrite,
       writing: { provider: 'openai', model: MODELS.writing },
       latex: {
         provider: latexProvider,
