@@ -161,7 +161,7 @@ export async function runPlanAndWriteStage(
     { role: 'user' as const, content: userPrompt },
   ];
 
-  // Plan+write always uses OpenAI (fast: gpt-5.4-mini; pro: gpt-5.5 + reasoning_effort).
+  // Plan+write uses OpenAI only (fast: gpt-5.4-mini; pro: gpt-5.5 + reasoning_effort).
   if (!isOpenAIConfigured()) {
     throw new Error('No LLM provider configured (need OPENAI_API_KEY)');
   }
@@ -232,6 +232,11 @@ export async function runPlanAndWriteStage(
   if (parseFailed || draftsRaw.length === 0) {
     throw new Error('Plan+write returned no usable suggestions from any model');
   }
+
+  /* DeepSeek pro path (disabled) — restore from git history if needed:
+  async function callDeepSeek(): Promise<{ raw: string; model: string }> { ... }
+  if (useDeepSeek) { ... fallback to callOpenAI on failure ... }
+  */
 
   const validTypes = new Set<EditType>([
     'reframe',

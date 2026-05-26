@@ -29,15 +29,32 @@ describe('buildOpenAIChatParams', () => {
 
   it('reports OpenAI plan+write routing in pro mode', async () => {
     vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
+    vi.stubEnv('RESUME_PRO_PROVIDER', 'openai');
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     vi.stubEnv('RESUME_PRO_REASONING_EFFORT', 'high');
     const { getProviderStatus } = await import('./clients');
     const status = getProviderStatus();
+    expect(status.pro_provider).toBe('openai');
     expect(status.routing.planWrite).toEqual({
       provider: 'openai',
       model: 'gpt-5.5',
       reasoning_effort: 'high',
     });
+  });
+
+  it('ignores RESUME_PRO_PROVIDER=deepseek when DeepSeek pro is disabled', async () => {
+    vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
+    vi.stubEnv('RESUME_PRO_PROVIDER', 'deepseek');
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const { getProviderStatus } = await import('./clients');
+    const status = getProviderStatus();
+    expect(status.pro_provider).toBe('openai');
+    expect(status.routing.planWrite).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      reasoning_effort: 'medium',
+    });
+    expect(status.deepseek).toBe(false);
   });
 
   it('fast mode uses gpt-5.4-mini without reasoning_effort in health', async () => {

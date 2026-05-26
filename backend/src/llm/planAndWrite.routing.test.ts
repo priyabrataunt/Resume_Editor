@@ -7,8 +7,9 @@ describe('runPlanAndWriteStage pro routing', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls gpt-5.5 with reasoning_effort in pro mode', async () => {
+  it('calls gpt-5.5 with reasoning_effort in pro openai mode', async () => {
     vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
+    vi.stubEnv('RESUME_PRO_PROVIDER', 'openai');
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     vi.stubEnv('RESUME_PRO_REASONING_EFFORT', 'medium');
 

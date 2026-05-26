@@ -12,6 +12,7 @@ import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai'
 
 export type QualityMode = 'fast' | 'pro';
 export type ReasoningEffort = 'medium' | 'high';
+export type ProProvider = 'openai' | 'deepseek';
 
 export const QUALITY_MODE: QualityMode =
   process.env.RESUME_QUALITY_MODE === 'pro' ? 'pro' : 'fast';
@@ -20,8 +21,26 @@ export function getProReasoningEffort(): ReasoningEffort {
   return process.env.RESUME_PRO_REASONING_EFFORT === 'high' ? 'high' : 'medium';
 }
 
+/** Pro plan+write always uses OpenAI (gpt-5.5). DeepSeek pro path disabled — see git history to re-enable. */
+export function getProPlanWriteProvider(): ProProvider {
+  return 'openai';
+  // if (QUALITY_MODE !== 'pro') return 'openai';
+  // return process.env.RESUME_PRO_PROVIDER === 'deepseek' ? 'deepseek' : 'openai';
+}
+
+export function getProPlanWriteModel(): string {
+  if (QUALITY_MODE !== 'pro') {
+    return MODELS.writing;
+  }
+  return process.env.RESUME_WRITING_MODEL ?? 'gpt-5.5';
+  // DeepSeek pro (disabled):
+  // if (getProPlanWriteProvider() === 'deepseek') {
+  //   return process.env.RESUME_REASONING_MODEL ?? 'deepseek-v4-pro';
+  // }
+}
+
 // ── Model identifiers (env-overridable) ──────────────────────────────────────
-// Fast: gpt-5.4-mini for low-latency plan+write. Pro: gpt-5.5 + reasoning_effort.
+// Fast: gpt-5.4-mini. Pro: gpt-5.5 (OpenAI only).
 export const MODELS = {
   reasoning:
     process.env.RESUME_REASONING_MODEL ??
@@ -90,23 +109,23 @@ export function buildOpenAIChatParams(input: OpenAIChatParamsInput): Record<stri
   return params;
 }
 
-// ── DeepSeek (OpenAI-compatible) ────────────────────────────────────────────
-let _deepseek: OpenAI | null = null;
-export function getDeepSeek(): OpenAI {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('DEEPSEEK_API_KEY is not set. Add it to backend/.env');
-  }
-  if (!_deepseek) {
-    _deepseek = new OpenAI({
-      apiKey: process.env.DEEPSEEK_API_KEY,
-      baseURL: 'https://api.deepseek.com',
-    });
-  }
-  return _deepseek;
-}
+// ── DeepSeek (OpenAI-compatible) — pro path disabled; key optional in .env ───
+// let _deepseek: OpenAI | null = null;
+// export function getDeepSeek(): OpenAI {
+//   if (!process.env.DEEPSEEK_API_KEY) {
+//     throw new Error('DEEPSEEK_API_KEY is not set. Add it to backend/.env');
+//   }
+//   if (!_deepseek) {
+//     _deepseek = new OpenAI({
+//       apiKey: process.env.DEEPSEEK_API_KEY,
+//       baseURL: 'https://api.deepseek.com',
+//     });
+//   }
+//   return _deepseek;
+// }
 
 export function isDeepSeekConfigured(): boolean {
-  return !!process.env.DEEPSEEK_API_KEY;
+  return false; // disabled — was: !!process.env.DEEPSEEK_API_KEY
 }
 
 // ── Gemini ──────────────────────────────────────────────────────────────────
@@ -137,9 +156,14 @@ export interface ProviderStatus {
   gemini: boolean;
   models: typeof MODELS;
   quality_mode: QualityMode;
+  pro_provider: ProProvider;
   // Effective routing after key-availability fallback.
   routing: {
-    planWrite: { provider: 'openai'; model: string; reasoning_effort?: ReasoningEffort };
+    planWrite: {
+      provider: ProProvider;
+      model: string;
+      reasoning_effort?: ReasoningEffort;
+    };
     writing: { provider: 'openai'; model: string };
     latex: { provider: 'gemini' | 'openai'; model: string };
   };
@@ -147,9 +171,10 @@ export interface ProviderStatus {
 
 export function getProviderStatus(): ProviderStatus {
   const latexProvider = isGeminiConfigured() ? 'gemini' : 'openai';
+  const proProvider = getProPlanWriteProvider();
   const planWrite: ProviderStatus['routing']['planWrite'] = {
-    provider: 'openai',
-    model: MODELS.writing,
+    provider: proProvider,
+    model: getProPlanWriteModel(),
   };
   if (QUALITY_MODE === 'pro') {
     planWrite.reasoning_effort = getProReasoningEffort();
@@ -160,6 +185,7 @@ export function getProviderStatus(): ProviderStatus {
     gemini: isGeminiConfigured(),
     models: MODELS,
     quality_mode: QUALITY_MODE,
+    pro_provider: proProvider,
     routing: {
       planWrite,
       writing: { provider: 'openai', model: MODELS.writing },
