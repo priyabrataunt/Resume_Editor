@@ -19,25 +19,35 @@ describe('buildOpenAIChatParams', () => {
     expect(params.max_completion_tokens).toBe(4000);
   });
 
-  it('defaults pro writing to gpt-5.5 with gpt-5.4 fallback', async () => {
+  it('defaults pro writing to gpt-5.4 with gpt-5.4-mini fallback', async () => {
     vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
     const { MODELS, QUALITY_MODE } = await import('./clients');
     expect(QUALITY_MODE).toBe('pro');
-    expect(MODELS.writing).toBe('gpt-5.5');
-    expect(MODELS.writingFallback).toBe('gpt-5.4');
+    expect(MODELS.writing).toBe('gpt-5.4');
+    expect(MODELS.writingFallback).toBe('gpt-5.4-mini');
   });
 
-  it('reports OpenAI plan+write routing in pro mode', async () => {
+  it('reports OpenAI plan+write routing in pro mode without reasoning by default', async () => {
     vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
     vi.stubEnv('RESUME_PRO_PROVIDER', 'openai');
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    vi.stubEnv('RESUME_PRO_REASONING_EFFORT', 'high');
     const { getProviderStatus } = await import('./clients');
     const status = getProviderStatus();
     expect(status.pro_provider).toBe('openai');
     expect(status.routing.planWrite).toEqual({
       provider: 'openai',
-      model: 'gpt-5.5',
+      model: 'gpt-5.4',
+    });
+  });
+
+  it('includes reasoning_effort in health when RESUME_PRO_REASONING_EFFORT is set', async () => {
+    vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    vi.stubEnv('RESUME_PRO_REASONING_EFFORT', 'high');
+    const { getProviderStatus } = await import('./clients');
+    expect(getProviderStatus().routing.planWrite).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.4',
       reasoning_effort: 'high',
     });
   });
@@ -51,8 +61,7 @@ describe('buildOpenAIChatParams', () => {
     expect(status.pro_provider).toBe('openai');
     expect(status.routing.planWrite).toEqual({
       provider: 'openai',
-      model: 'gpt-5.5',
-      reasoning_effort: 'medium',
+      model: 'gpt-5.4',
     });
     expect(status.deepseek).toBe(false);
   });

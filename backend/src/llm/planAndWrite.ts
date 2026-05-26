@@ -161,7 +161,7 @@ export async function runPlanAndWriteStage(
     { role: 'user' as const, content: userPrompt },
   ];
 
-  // Plan+write uses OpenAI only (fast: gpt-5.4-mini; pro: gpt-5.5 + reasoning_effort).
+  // Plan+write uses OpenAI (fast: gpt-5.4-mini; pro: gpt-5.4, optional reasoning_effort).
   if (!isOpenAIConfigured()) {
     throw new Error('No LLM provider configured (need OPENAI_API_KEY)');
   }

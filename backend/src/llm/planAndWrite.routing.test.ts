@@ -7,11 +7,10 @@ describe('runPlanAndWriteStage pro routing', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls gpt-5.5 with reasoning_effort in pro openai mode', async () => {
+  it('calls gpt-5.4 in pro mode without reasoning by default', async () => {
     vi.stubEnv('RESUME_QUALITY_MODE', 'pro');
     vi.stubEnv('RESUME_PRO_PROVIDER', 'openai');
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    vi.stubEnv('RESUME_PRO_REASONING_EFFORT', 'medium');
 
     const mockCreate = vi.fn().mockResolvedValue({
       choices: [
@@ -60,12 +59,12 @@ describe('runPlanAndWriteStage pro routing', () => {
       12
     );
 
-    expect(result.model).toBe('gpt-5.5');
+    expect(result.model).toBe('gpt-5.4');
     expect(result.drafts).toHaveLength(1);
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const params = mockCreate.mock.calls[0][0] as Record<string, unknown>;
-    expect(params.model).toBe('gpt-5.5');
-    expect(params.reasoning_effort).toBe('medium');
+    expect(params.model).toBe('gpt-5.4');
+    expect(params.reasoning_effort).toBeUndefined();
     expect(params.response_format).toEqual({ type: 'json_object' });
   });
 });

@@ -17,11 +17,13 @@ export type ProProvider = 'openai' | 'deepseek';
 export const QUALITY_MODE: QualityMode =
   process.env.RESUME_QUALITY_MODE === 'pro' ? 'pro' : 'fast';
 
-export function getProReasoningEffort(): ReasoningEffort {
-  return process.env.RESUME_PRO_REASONING_EFFORT === 'high' ? 'high' : 'medium';
+export function getProReasoningEffort(): ReasoningEffort | undefined {
+  const effort = process.env.RESUME_PRO_REASONING_EFFORT;
+  if (effort === 'high' || effort === 'medium') return effort;
+  return undefined; // off by default — reasoning adds 60s+ latency on gpt-5.x
 }
 
-/** Pro plan+write always uses OpenAI (gpt-5.5). DeepSeek pro path disabled — see git history to re-enable. */
+/** Pro plan+write uses OpenAI gpt-5.4 (balance of quality + ~30s latency). */
 export function getProPlanWriteProvider(): ProProvider {
   return 'openai';
   // if (QUALITY_MODE !== 'pro') return 'openai';
@@ -32,7 +34,7 @@ export function getProPlanWriteModel(): string {
   if (QUALITY_MODE !== 'pro') {
     return MODELS.writing;
   }
-  return process.env.RESUME_WRITING_MODEL ?? 'gpt-5.5';
+  return process.env.RESUME_WRITING_MODEL ?? 'gpt-5.4';
   // DeepSeek pro (disabled):
   // if (getProPlanWriteProvider() === 'deepseek') {
   //   return process.env.RESUME_REASONING_MODEL ?? 'deepseek-v4-pro';
@@ -40,17 +42,17 @@ export function getProPlanWriteModel(): string {
 }
 
 // ── Model identifiers (env-overridable) ──────────────────────────────────────
-// Fast: gpt-5.4-mini. Pro: gpt-5.5 (OpenAI only).
+// Fast: gpt-5.4-mini (~5–10s). Pro: gpt-5.4 (~30–40s, no reasoning by default).
 export const MODELS = {
   reasoning:
     process.env.RESUME_REASONING_MODEL ??
-    (QUALITY_MODE === 'pro' ? 'gpt-5.5' : 'deepseek-v4-flash'),
+    (QUALITY_MODE === 'pro' ? 'gpt-5.4' : 'deepseek-v4-flash'),
   writing:
     process.env.RESUME_WRITING_MODEL ??
-    (QUALITY_MODE === 'pro' ? 'gpt-5.5' : 'gpt-5.4-mini'),
+    (QUALITY_MODE === 'pro' ? 'gpt-5.4' : 'gpt-5.4-mini'),
   writingFallback:
     process.env.RESUME_WRITING_FALLBACK_MODEL ??
-    (QUALITY_MODE === 'pro' ? 'gpt-5.4' : 'gpt-4o-mini'),
+    (QUALITY_MODE === 'pro' ? 'gpt-5.4-mini' : 'gpt-4o-mini'),
   latex:
     process.env.RESUME_LATEX_MODEL ??
     (QUALITY_MODE === 'pro' ? 'gemini-3.1-pro' : 'gemini-3.5-flash'),
@@ -177,7 +179,8 @@ export function getProviderStatus(): ProviderStatus {
     model: getProPlanWriteModel(),
   };
   if (QUALITY_MODE === 'pro') {
-    planWrite.reasoning_effort = getProReasoningEffort();
+    const effort = getProReasoningEffort();
+    if (effort) planWrite.reasoning_effort = effort;
   }
   return {
     openai: isOpenAIConfigured(),
