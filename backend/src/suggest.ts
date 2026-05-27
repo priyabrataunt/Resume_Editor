@@ -133,6 +133,7 @@ Suggestion types:
     %  →  \\%   (e.g. "30%" must be written as "30\\%")
     &  →  \\&   (e.g. "R&D" must be written as "R\\&D")
     _  →  \\_   (e.g. "Node_js" must be written as "Node\\_js")
+- Multi-line LaTeX blocks (e.g. \\small{\\item{ ... }} with a separate closing }} line) must keep the same brace structure — never delete closing }} lines or drop trailing } from a line you replace
 - For "remove" type: set "new" to ""
 - Each suggestion must reference specific JD keywords it addresses
 - Prioritize the most impactful edits first (high priority, more jd_keywords_addressed) — the API returns at most ${MAX_SUGGESTIONS_RETURNED} suggestions after ranking

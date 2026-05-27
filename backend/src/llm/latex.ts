@@ -17,6 +17,7 @@ import {
 import {
   commandsPreserved,
   isBraceBalanced,
+  preserveTrailingClosers,
   sanitizeLatexText,
 } from '../suggestPipeline';
 import type { DraftItem } from './planAndWrite';
@@ -42,7 +43,10 @@ Hard rules:
      _  → \\_
    These are by far the most common compile-fail bugs (e.g. "C#" or "30%"
    not escaped).
-3. Braces must be balanced.
+3. Braces must be balanced on the edited line AND in the full document after the edit.
+   Multi-line blocks like \\small{\\item{ ... }} rely on a closing }} line — never
+   delete or omit those closers; if "old" ends with one or more }, keep the same
+   trailing closers on "new".
 4. Do NOT touch structural macros: \\begin/\\end, \\section*, \\subsection*,
    \\resumeSubHeadingListStart/End, \\resumeItemListStart/End,
    \\resumeSubheading, \\resumeProjectHeading.
@@ -175,7 +179,8 @@ export async function runLatexStage(drafts: DraftItem[]): Promise<{ items: Align
     let nextNew = draft.new;
 
     if (a?.new && !a.drop) {
-      const proposed = sanitizeLatexText(String(a.new));
+      let proposed = sanitizeLatexText(String(a.new));
+      proposed = preserveTrailingClosers(draft.old, proposed);
       const balanced = isBraceBalanced(proposed);
       const commandsOk =
         draft.type === 'add' || draft.type === 'remove'
@@ -184,12 +189,12 @@ export async function runLatexStage(drafts: DraftItem[]): Promise<{ items: Align
       if (balanced && commandsOk) {
         nextNew = proposed;
       } else {
-        nextNew = sanitizeLatexText(draft.new);
+        nextNew = preserveTrailingClosers(draft.old, sanitizeLatexText(draft.new));
       }
     } else if (a?.drop) {
       nextNew = sanitizeLatexText(draft.new);
     } else {
-      nextNew = sanitizeLatexText(draft.new);
+      nextNew = preserveTrailingClosers(draft.old, sanitizeLatexText(draft.new));
     }
 
     if (draft.type === 'remove') nextNew = '';

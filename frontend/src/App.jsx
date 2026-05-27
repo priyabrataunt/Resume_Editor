@@ -5,7 +5,7 @@ import PDFPreview from './components/PDFPreview.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import { useSuggestions } from './hooks/useSuggestions.js';
 import { useUndoStack } from './hooks/useUndoStack.js';
-import { sanitizeLatexText, isItemizeBalanced } from './utils/latexSafety.js';
+import { sanitizeLatexText, isDocumentStructureValid, finalizeReplacementLine } from './utils/latexSafety.js';
 
 const DEFAULT_TEX = `\\documentclass[11pt]{article}
 \\usepackage{geometry}
@@ -426,8 +426,8 @@ export default function App() {
       const undoEntry = { old: s.old, new: '', line: s.line };
       lines.splice(lineIdx, 1);
       const nextText = lines.join('\n');
-      if (!isItemizeBalanced(nextText)) {
-        return { error: 'Would break LaTeX list structure (unbalanced itemize).' };
+      if (!isDocumentStructureValid(nextText)) {
+        return { error: 'Would break LaTeX structure (unbalanced braces or itemize).' };
       }
       return { nextText, undoEntry };
     }
@@ -437,11 +437,11 @@ export default function App() {
 
     if (s.old && lineInRange) {
       if (lineText === s.old) {
-        lines[lineIdx] = sanitisedNew;
+        lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
         undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
         nextText = lines.join('\n');
       } else if (lineText.includes(s.old)) {
-        const nextLine = lineText.replace(s.old, () => sanitisedNew);
+        const nextLine = finalizeReplacementLine(lineText, lineText.replace(s.old, () => sanitisedNew));
         if (nextLine !== lineText) {
           lines[lineIdx] = nextLine;
           undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
@@ -453,13 +453,13 @@ export default function App() {
           undoEntry = { old: s.old, new: sanitisedNew, line: s.line };
           nextText = updated;
         } else if (lineInRange) {
-          lines[lineIdx] = sanitisedNew;
+          lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
           undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
           nextText = lines.join('\n');
         }
       }
     } else if (!s.old && lineInRange) {
-      lines[lineIdx] = sanitisedNew;
+      lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
       undoEntry = { line: s.line, lineUndoBefore: lineText, old: '', new: sanitisedNew };
       nextText = lines.join('\n');
     } else if (s.old) {
@@ -468,7 +468,7 @@ export default function App() {
         undoEntry = { old: s.old, new: sanitisedNew, line: s.line };
         nextText = updated;
       } else if (lineInRange) {
-        lines[lineIdx] = sanitisedNew;
+        lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
         undoEntry = { line: s.line, lineUndoBefore: lineText, old: s.old, new: sanitisedNew };
         nextText = lines.join('\n');
       }
@@ -477,8 +477,8 @@ export default function App() {
     if (nextText === null) {
       return { error: 'Could not locate target text in the editor.' };
     }
-    if (!isItemizeBalanced(nextText)) {
-      return { error: 'Would break LaTeX list structure (unbalanced itemize).' };
+    if (!isDocumentStructureValid(nextText)) {
+      return { error: 'Would break LaTeX structure (unbalanced braces or itemize).' };
     }
     return { nextText, undoEntry };
   }

@@ -56,6 +56,7 @@ Rules:
 - "old" must match the source line character-for-character.
 - Preserve LaTeX commands from "old" to "new".
 - Escape specials in content: # -> \\#, % -> \\%, & -> \\&, _ -> \\_.
+- Never drop trailing } closers from a line you replace (e.g. skills blocks use a separate }} line).
 - Never touch [PROTECTED] lines, section headings, or structural macros.
 - For remove: set "new" to "". For add: set "old" to "".
 - Follow the PERSONA block (in the user message) if present.`;

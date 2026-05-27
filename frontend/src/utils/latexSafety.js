@@ -35,6 +35,27 @@ export function isItemizeBalanced(tex) {
   return opens === closes;
 }
 
+export function isDocumentStructureValid(tex) {
+  return isBraceBalanced(tex) && isItemizeBalanced(tex);
+}
+
+/** Preserve trailing `}` closers when AI drops them during a line replace. */
+export function preserveTrailingClosers(oldLine, newLine) {
+  const oldMatch = oldLine.match(/(\}+)\s*$/);
+  if (!oldMatch) return newLine;
+  const oldClosers = oldMatch[1];
+  const newMatch = newLine.match(/(\}+)\s*$/);
+  const newClosers = newMatch?.[1] ?? '';
+  if (newClosers.length >= oldClosers.length) return newLine;
+  const missing = oldClosers.slice(newClosers.length);
+  return `${newLine.replace(/\s*$/, '')}${missing}`;
+}
+
+export function finalizeReplacementLine(oldLine, newLine) {
+  if (!newLine) return newLine;
+  return preserveTrailingClosers(oldLine, newLine);
+}
+
 export function isBraceBalanced(str) {
   if (!str) return true;
   let depth = 0;

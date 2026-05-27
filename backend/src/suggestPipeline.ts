@@ -90,6 +90,7 @@ const PROTECTED_PATTERNS = [
 
 export function isProtectedLine(line: string): boolean {
   const trimmed = line.trim();
+  if (/^}+$/.test(trimmed)) return true;
   return PROTECTED_PATTERNS.some(p => p.test(trimmed));
 }
 
@@ -101,6 +102,101 @@ export function isBraceBalanced(str: string): boolean {
     if (depth < 0) return false;
   }
   return depth === 0;
+}
+
+export function isItemizeBalanced(tex: string): boolean {
+  const opens = (tex.match(/\\begin\{itemize\}|\\resumeSubHeadingListStart|\\resumeItemListStart/g) || [])
+    .length;
+  const closes = (tex.match(/\\end\{itemize\}|\\resumeSubHeadingListEnd|\\resumeItemListEnd/g) || [])
+    .length;
+  return opens === closes;
+}
+
+/** Whole-document structural guard used before returning or applying suggestions. */
+export function isDocumentStructureValid(tex: string): boolean {
+  return isBraceBalanced(tex) && isItemizeBalanced(tex);
+}
+
+/**
+ * When AI replaces a line, it often drops trailing `}` closers (e.g. the `}}`
+ * that closes `\small{\item{` skills blocks). Preserve closers from the old line.
+ */
+export function preserveTrailingClosers(oldLine: string, newLine: string): string {
+  const oldMatch = oldLine.match(/(\}+)\s*$/);
+  if (!oldMatch) return newLine;
+  const oldClosers = oldMatch[1];
+  const newMatch = newLine.match(/(\}+)\s*$/);
+  const newClosers = newMatch?.[1] ?? '';
+  if (newClosers.length >= oldClosers.length) return newLine;
+  const missing = oldClosers.slice(newClosers.length);
+  return `${newLine.replace(/\s*$/, '')}${missing}`;
+}
+
+function finalizeReplacementLine(oldLine: string, newLine: string): string {
+  if (!newLine) return newLine;
+  return preserveTrailingClosers(oldLine, newLine);
+}
+
+/**
+ * Simulate applying one suggestion to the resume (mirrors frontend apply logic).
+ * Used to reject edits that would leave the full document structurally invalid.
+ */
+export function previewSuggestionApply(
+  resumeLines: string[],
+  s: Suggestion
+): { nextLines: string[] } | { error: string } {
+  const sanitisedNew = s.type === 'remove' ? '' : sanitizeLatexText(s.new ?? '');
+  const lines = [...resumeLines];
+  const lineIdx = s.line - 1;
+  const lineInRange = lineIdx >= 0 && lineIdx < lines.length;
+  const lineText = lineInRange ? lines[lineIdx] : '';
+  const currentText = resumeLines.join('\n');
+
+  if (s.type === 'remove' && !sanitisedNew) {
+    if (!lineInRange) return { error: 'target line out of range' };
+    lines.splice(lineIdx, 1);
+    return { nextLines: lines };
+  }
+
+  let nextText: string | null = null;
+
+  if (s.old && lineInRange) {
+    if (lineText === s.old) {
+      lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
+      nextText = lines.join('\n');
+    } else if (lineText.includes(s.old)) {
+      const nextLine = finalizeReplacementLine(lineText, lineText.replace(s.old, () => sanitisedNew));
+      if (nextLine !== lineText) {
+        lines[lineIdx] = nextLine;
+        nextText = lines.join('\n');
+      }
+    } else {
+      const updated = currentText.replace(s.old, () => sanitisedNew);
+      if (updated !== currentText) {
+        nextText = updated;
+      } else if (lineInRange) {
+        lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
+        nextText = lines.join('\n');
+      }
+    }
+  } else if (!s.old && lineInRange) {
+    lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
+    nextText = lines.join('\n');
+  } else if (s.old) {
+    const updated = currentText.replace(s.old, () => sanitisedNew);
+    if (updated !== currentText) {
+      nextText = updated;
+    } else if (lineInRange) {
+      lines[lineIdx] = finalizeReplacementLine(lineText, sanitisedNew);
+      nextText = lines.join('\n');
+    }
+  }
+
+  if (nextText === null) {
+    return { error: 'could not locate target text' };
+  }
+
+  return { nextLines: nextText.split('\n') };
 }
 
 export function extractCommands(str: string): string[] {
@@ -235,6 +331,13 @@ export function suggestionRejection(s: Suggestion, resumeLines: string[]): strin
   }
   if (containsStructuralMacro(s.old)) return 'old text contains a structural macro';
   if (s.type !== 'remove' && containsStructuralMacro(s.new)) return 'new text contains a structural macro';
+
+  const preview = previewSuggestionApply(resumeLines, s);
+  if ('error' in preview) return preview.error;
+  if (!isDocumentStructureValid(preview.nextLines.join('\n'))) {
+    return 'would break document brace or list structure';
+  }
+
   return null;
 }
 

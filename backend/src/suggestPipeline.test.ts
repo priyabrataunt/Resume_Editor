@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   isProtectedLine,
   isBraceBalanced,
+  isItemizeBalanced,
+  isDocumentStructureValid,
+  preserveTrailingClosers,
+  previewSuggestionApply,
   extractCommands,
   commandsPreserved,
   buildItemizeMap,
@@ -34,6 +38,11 @@ describe('isProtectedLine', () => {
     expect(isProtectedLine('\\documentclass{article}')).toBe(true);
     expect(isProtectedLine('\\resumeItem{Built foo}')).toBe(false);
   });
+
+  it('protects brace-only closing lines used by skills blocks', () => {
+    expect(isProtectedLine('    }}')).toBe(true);
+    expect(isProtectedLine('}')).toBe(true);
+  });
 });
 
 describe('isBraceBalanced', () => {
@@ -43,6 +52,85 @@ describe('isBraceBalanced', () => {
     expect(isBraceBalanced('{')).toBe(false);
     expect(isBraceBalanced('}')).toBe(false);
     expect(isBraceBalanced('{}}')).toBe(false);
+  });
+});
+
+describe('isDocumentStructureValid', () => {
+  it('requires both brace and itemize balance', () => {
+    const ok = [
+      '\\begin{itemize}',
+      '  \\item A',
+      '\\end{itemize}',
+    ].join('\n');
+    expect(isDocumentStructureValid(ok)).toBe(true);
+
+    const unbalancedBraces = [
+      '\\begin{itemize}',
+      '  \\small{\\item{',
+      '  \\end{itemize}',
+    ].join('\n');
+    expect(isDocumentStructureValid(unbalancedBraces)).toBe(false);
+    expect(isItemizeBalanced(unbalancedBraces)).toBe(true);
+  });
+});
+
+describe('preserveTrailingClosers', () => {
+  it('restores dropped closing braces from the old line', () => {
+    expect(preserveTrailingClosers('    }}', '     \\textbf{Ops}{: foo}')).toBe(
+      '     \\textbf{Ops}{: foo}}'
+    );
+    expect(preserveTrailingClosers('    }}', '    }}')).toBe('    }}');
+  });
+});
+
+describe('previewSuggestionApply', () => {
+  const skillsLines = [
+    '\\section{Skills}',
+    ' \\begin{itemize}[leftmargin=0.15in, label={}]',
+    '    \\small{\\item{',
+    '     \\textbf{Languages}{: Python}',
+    '    }}',
+    ' \\end{itemize}',
+  ];
+
+  it('allows editing a skills content line without breaking structure', () => {
+    const suggestion = s({
+      line: 4,
+      old: '     \\textbf{Languages}{: Python}',
+      new: '     \\textbf{Languages}{: Python, Go}',
+      type: 'keyword',
+    });
+    const preview = previewSuggestionApply(skillsLines, suggestion);
+    expect('error' in preview).toBe(false);
+    if ('error' in preview) return;
+    expect(isDocumentStructureValid(preview.nextLines.join('\n'))).toBe(true);
+  });
+
+  it('auto-restores dropped closers on the skills closing line', () => {
+    const suggestion = s({
+      line: 5,
+      old: '    }}',
+      new: '    }',
+      type: 'keyword',
+    });
+    const preview = previewSuggestionApply(skillsLines, suggestion);
+    expect('error' in preview).toBe(false);
+    if ('error' in preview) return;
+    expect(preview.nextLines[4]).toBe('    }}');
+    expect(isDocumentStructureValid(preview.nextLines.join('\n'))).toBe(true);
+  });
+
+  it('detects when removing the skills closing line breaks the document', () => {
+    const suggestion = s({
+      line: 5,
+      old: '    }}',
+      new: '',
+      type: 'remove',
+    });
+    const preview = previewSuggestionApply(skillsLines, suggestion);
+    expect('error' in preview).toBe(false);
+    if ('error' in preview) return;
+    expect(isDocumentStructureValid(preview.nextLines.join('\n'))).toBe(false);
   });
 });
 
@@ -124,6 +212,27 @@ describe('suggestionRejection', () => {
       listLines
     );
     expect(r).toBe('removes \\item from list context');
+  });
+
+  it('rejects edits that would leave the full document with unbalanced braces', () => {
+    const skillsLines = [
+      '\\section{Skills}',
+      ' \\begin{itemize}[leftmargin=0.15in, label={}]',
+      '    \\small{\\item{',
+      '     \\textbf{Languages}{: Python}',
+      '    }}',
+      ' \\end{itemize}',
+    ];
+    const r = suggestionRejection(
+      s({
+        line: 3,
+        old: '    \\small{\\item{',
+        new: '    \\small\\item',
+        type: 'keyword',
+      }),
+      skillsLines
+    );
+    expect(r).toBe('would break document brace or list structure');
   });
 });
 
